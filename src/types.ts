@@ -1,4 +1,6 @@
 export type Mode = "title" | "playing" | "paused" | "game_over";
+export type Screen = "title" | "map_select" | "difficulty_select" | "playing" | "paused" | "game_over";
+export type DifficultyChoice = "easy" | "medium" | "hard";
 
 export interface Vec2 {
   x: number;
@@ -52,8 +54,11 @@ export interface PendingEvent {
 
 export interface GameState {
   mode: Mode;
+  screen: Screen;
   score: number;
   lives: number;
+  selectedMapId: string;
+  selectedDifficulty: DifficultyChoice;
   wave: number;
   elapsedMs: number;
   speedRoundActive: boolean;
@@ -73,6 +78,9 @@ export interface GameState {
   spawnedInWave: number;
   waveTargetCount: number;
   nextEntityId: number;
+  pathPoints: Vec2[];
+  pathSegments: PathSegment[];
+  pathTotalLength: number;
   muzzleFlashMs: number;
   hitMarkerMs: number;
   hitMarkerX: number;
@@ -84,9 +92,11 @@ export interface GameState {
 
 export interface GameSnapshot {
   mode: Mode;
+  screen: Screen;
   score: number;
   lives: number;
   wave: number;
+  selectedMapId: string;
   elapsedMs: number;
   speedRoundActive: boolean;
   speedRoundEndsInMs: number;

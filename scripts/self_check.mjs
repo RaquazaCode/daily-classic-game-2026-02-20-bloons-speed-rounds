@@ -7,6 +7,8 @@ const mainSource = readFileSync(resolve(root, "src/main.ts"), "utf8");
 const gameSource = readFileSync(resolve(root, "src/game.ts"), "utf8");
 const renderSource = readFileSync(resolve(root, "src/render.ts"), "utf8");
 const inputSource = readFileSync(resolve(root, "src/input.ts"), "utf8");
+const mapsSource = readFileSync(resolve(root, "src/data/maps.ts"), "utf8");
+const menuSource = readFileSync(resolve(root, "src/ui/menu.ts"), "utf8");
 
 function assert(condition, message) {
   if (!condition) {
@@ -18,6 +20,7 @@ function assert(condition, message) {
 assert(mainSource.includes("window.advanceTime"), "window.advanceTime hook missing");
 assert(mainSource.includes("window.render_game_to_text"), "window.render_game_to_text hook missing");
 assert(mainSource.includes("scripted_demo"), "scripted_demo mode missing");
+assert(mainSource.includes("localStorage"), "course selection persistence missing");
 
 assert(gameSource.includes("speedRoundActive"), "speed round state missing");
 assert(gameSource.includes("updateGame"), "update loop missing");
@@ -28,10 +31,18 @@ assert(gameSource.includes("dartPool"), "projectile object pooling missing");
 assert(gameSource.includes("particlePool"), "particle object pooling missing");
 assert(gameSource.includes("spawnPopParticles"), "pop particle effect missing");
 assert(gameSource.includes("hitMarkerMs"), "hit marker feedback missing");
+assert(gameSource.includes("screen"), "screen state machine missing");
+assert(gameSource.includes("selectedMapId"), "selected map state missing");
+assert(gameSource.includes("selectedDifficulty"), "difficulty state missing");
 
 assert(renderSource.includes("Speed round") || renderSource.includes("speed round"), "speed round HUD text missing");
 assert(renderSource.includes("drawEffectsLayer"), "layered renderer effect pass missing");
 assert(renderSource.includes("drawColorblindMarker"), "colorblind-safe balloon markers missing");
+assert(renderSource.includes("drawMapSelectScreen"), "map select screen rendering missing");
+assert(renderSource.includes("drawDifficultySelectScreen"), "difficulty select rendering missing");
 assert(inputSource.includes("isStartButtonHit"), "start button targeting missing");
+assert(mapsSource.includes("MAP_DEFINITIONS"), "map definitions missing");
+assert(menuSource.includes("hitMapCard"), "map selection hit-test missing");
+assert(menuSource.includes("hitDifficultyButton"), "difficulty selection hit-test missing");
 
 console.log("Self-check passed: deterministic loop, hooks, speed rounds, and scripted path are present.");

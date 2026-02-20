@@ -1,12 +1,6 @@
-import {
-  CANVAS_HEIGHT,
-  CANVAS_WIDTH,
-  GAME_TITLE,
-  PATH_POINTS,
-  SPEED_ROUND_SCORE_MULTIPLIER,
-  START_BUTTON,
-  TOWER_POSITION,
-} from "./constants";
+import { CANVAS_HEIGHT, CANVAS_WIDTH, GAME_TITLE, SPEED_ROUND_SCORE_MULTIPLIER, START_BUTTON, TOWER_POSITION } from "./constants";
+import { DIFFICULTY_OPTIONS, difficultyButtonRect, mapCardRect } from "./ui/menu";
+import { MAP_DEFINITIONS } from "./data/maps";
 import type { Balloon, GameState, Vec2 } from "./types";
 
 function drawBackgroundLayer(ctx: CanvasRenderingContext2D): void {
@@ -32,7 +26,6 @@ function drawBackgroundLayer(ctx: CanvasRenderingContext2D): void {
   }
   ctx.globalAlpha = 1;
 
-  // Foliage silhouettes for a stronger Neo Jungle framing.
   ctx.fillStyle = "rgba(5, 22, 17, 0.6)";
   for (let i = 0; i < 16; i += 1) {
     const x = i * 88 - 10;
@@ -44,26 +37,29 @@ function drawBackgroundLayer(ctx: CanvasRenderingContext2D): void {
   }
 }
 
-function drawPathLayer(ctx: CanvasRenderingContext2D): void {
-  ctx.lineCap = "round";
+function drawPathLayer(ctx: CanvasRenderingContext2D, pathPoints: Vec2[]): void {
+  if (pathPoints.length < 2) {
+    return;
+  }
 
+  ctx.lineCap = "round";
   ctx.lineWidth = 42;
   ctx.strokeStyle = "rgba(65, 90, 58, 0.58)";
   ctx.beginPath();
-  ctx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
-  for (const point of PATH_POINTS.slice(1)) {
+  ctx.moveTo(pathPoints[0].x, pathPoints[0].y);
+  for (const point of pathPoints.slice(1)) {
     ctx.lineTo(point.x, point.y);
   }
   ctx.stroke();
 
-  const lane = ctx.createLinearGradient(120, 575, 1125, 205);
+  const lane = ctx.createLinearGradient(pathPoints[0].x, pathPoints[0].y, pathPoints[pathPoints.length - 1].x, pathPoints[pathPoints.length - 1].y);
   lane.addColorStop(0, "#f5d68f");
   lane.addColorStop(1, "#d4b06a");
   ctx.lineWidth = 20;
   ctx.strokeStyle = lane;
   ctx.beginPath();
-  ctx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
-  for (const point of PATH_POINTS.slice(1)) {
+  ctx.moveTo(pathPoints[0].x, pathPoints[0].y);
+  for (const point of pathPoints.slice(1)) {
     ctx.lineTo(point.x, point.y);
   }
   ctx.stroke();
@@ -72,8 +68,8 @@ function drawPathLayer(ctx: CanvasRenderingContext2D): void {
   ctx.lineWidth = 3;
   ctx.strokeStyle = "rgba(80, 53, 19, 0.42)";
   ctx.beginPath();
-  ctx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
-  for (const point of PATH_POINTS.slice(1)) {
+  ctx.moveTo(pathPoints[0].x, pathPoints[0].y);
+  for (const point of pathPoints.slice(1)) {
     ctx.lineTo(point.x, point.y);
   }
   ctx.stroke();
@@ -184,8 +180,8 @@ function drawProjectilesLayer(ctx: CanvasRenderingContext2D, state: GameState): 
 function drawEffectsLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
   for (const particle of state.particles) {
     const alpha = Math.max(0.12, Math.min(1, particle.ttlMs / 260));
-    ctx.fillStyle = particle.color.replace("#", "#");
     ctx.globalAlpha = alpha;
+    ctx.fillStyle = particle.color;
     ctx.beginPath();
     ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -231,7 +227,7 @@ function drawHudPanel(ctx: CanvasRenderingContext2D, label: string, value: strin
   ctx.fillText(value, x + 12, y + 44);
 }
 
-function drawHeaderLayer(ctx: CanvasRenderingContext2D): void {
+function drawHeaderLayer(ctx: CanvasRenderingContext2D, subtitle: string): void {
   const headerGradient = ctx.createLinearGradient(0, 0, CANVAS_WIDTH, 0);
   headerGradient.addColorStop(0, "rgba(8, 33, 33, 0.88)");
   headerGradient.addColorStop(1, "rgba(17, 59, 46, 0.88)");
@@ -241,7 +237,11 @@ function drawHeaderLayer(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = "#ffd565";
   ctx.font = "700 30px 'Bungee', 'Trebuchet MS', sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(`${GAME_TITLE} • Neo Jungle`, CANVAS_WIDTH / 2, 46);
+  ctx.fillText(`${GAME_TITLE} • Neo Jungle`, CANVAS_WIDTH / 2, 44);
+
+  ctx.fillStyle = "#9ee6c6";
+  ctx.font = "600 17px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.fillText(subtitle, CANVAS_WIDTH / 2, 64);
   ctx.textAlign = "left";
 }
 
@@ -259,20 +259,95 @@ function drawButton(ctx: CanvasRenderingContext2D, label: string, center: Vec2):
   ctx.textAlign = "left";
 }
 
-function drawTitleOverlay(ctx: CanvasRenderingContext2D): void {
+function drawTitleScreen(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = "rgba(6, 18, 15, 0.78)";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
   ctx.fillStyle = "#fff6cc";
   ctx.font = "700 52px 'Bungee', 'Trebuchet MS', sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("Speed-Rounds Jungle", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 38);
+  ctx.fillText("Speed-Rounds Jungle", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 44);
 
-  ctx.font = "600 24px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.font = "600 23px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillStyle = "#aceac9";
-  ctx.fillText("Pop waves with reactive FX and deterministic timing.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
+  ctx.fillText("Three courses. Dynamic difficulty. Deterministic simulation.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 6);
 
-  drawButton(ctx, "Start Game", { x: START_BUTTON.x + START_BUTTON.width / 2, y: START_BUTTON.y + START_BUTTON.height / 2 });
+  drawButton(ctx, "Select Course", { x: START_BUTTON.x + START_BUTTON.width / 2, y: START_BUTTON.y + START_BUTTON.height / 2 });
+  ctx.textAlign = "left";
+}
+
+function drawMapSelectScreen(ctx: CanvasRenderingContext2D, state: GameState): void {
+  ctx.fillStyle = "rgba(4, 16, 14, 0.8)";
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#fff6cc";
+  ctx.font = "700 44px 'Bungee', 'Trebuchet MS', sans-serif";
+  ctx.fillText("Choose Course", CANVAS_WIDTH / 2, 172);
+
+  ctx.fillStyle = "#a6eacc";
+  ctx.font = "600 22px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.fillText("Easy, medium, and hard route geometry.", CANVAS_WIDTH / 2, 208);
+
+  MAP_DEFINITIONS.forEach((map, index) => {
+    const rect = mapCardRect(index);
+    const isSelected = state.selectedMapId === map.id;
+    ctx.fillStyle = isSelected ? "rgba(48, 133, 104, 0.9)" : "rgba(10, 38, 33, 0.9)";
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = isSelected ? "#d6ffbb" : "rgba(149, 237, 191, 0.5)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+    ctx.fillStyle = "#ffe18e";
+    ctx.font = "700 24px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(map.name, rect.x + 14, rect.y + 36);
+
+    ctx.fillStyle = "#c6f8df";
+    ctx.font = "600 17px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.fillText(map.summary, rect.x + 14, rect.y + 68);
+
+    ctx.fillStyle = "#f7f1cf";
+    ctx.font = "700 16px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.fillText(`Default: ${map.difficulty.toUpperCase()}`, rect.x + 14, rect.y + 98);
+    ctx.fillText("Click to continue", rect.x + 14, rect.y + 130);
+  });
+
+  ctx.textAlign = "left";
+}
+
+function drawDifficultySelectScreen(ctx: CanvasRenderingContext2D, state: GameState): void {
+  const selectedMap = MAP_DEFINITIONS.find((map) => map.id === state.selectedMapId) ?? MAP_DEFINITIONS[0];
+
+  ctx.fillStyle = "rgba(3, 15, 13, 0.8)";
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#fff6cc";
+  ctx.font = "700 44px 'Bungee', 'Trebuchet MS', sans-serif";
+  ctx.fillText("Choose Difficulty", CANVAS_WIDTH / 2, 172);
+
+  ctx.fillStyle = "#a6eacc";
+  ctx.font = "600 22px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.fillText(`${selectedMap.name} selected • pick challenge level`, CANVAS_WIDTH / 2, 208);
+
+  DIFFICULTY_OPTIONS.forEach((difficulty, index) => {
+    const rect = difficultyButtonRect(index);
+    const isSelected = difficulty === state.selectedDifficulty;
+    ctx.fillStyle = isSelected ? "rgba(249, 181, 93, 0.95)" : "rgba(10, 42, 37, 0.92)";
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = isSelected ? "#fff8d2" : "rgba(158, 233, 195, 0.52)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+    ctx.fillStyle = isSelected ? "#21362a" : "#d9fce7";
+    ctx.font = "700 24px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.fillText(difficulty.toUpperCase(), rect.x + rect.width / 2, rect.y + 43);
+  });
+
+  ctx.fillStyle = "#d9fce7";
+  ctx.font = "600 18px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.fillText("Click a difficulty to start", CANVAS_WIDTH / 2, 520);
   ctx.textAlign = "left";
 }
 
@@ -337,19 +412,28 @@ function drawHudLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
 
 export function renderGame(ctx: CanvasRenderingContext2D, state: GameState): void {
   drawBackgroundLayer(ctx);
-  drawPathLayer(ctx);
+  drawPathLayer(ctx, state.pathPoints);
   drawTowerLayer(ctx, state);
   drawBalloonsLayer(ctx, state);
   drawProjectilesLayer(ctx, state);
   drawEffectsLayer(ctx, state);
-  drawHeaderLayer(ctx);
-  drawHudLayer(ctx, state);
 
-  if (state.mode === "title") {
-    drawTitleOverlay(ctx);
-  } else if (state.mode === "paused") {
+  const selectedMap = MAP_DEFINITIONS.find((map) => map.id === state.selectedMapId) ?? MAP_DEFINITIONS[0];
+  drawHeaderLayer(ctx, `${selectedMap.name} • ${state.selectedDifficulty.toUpperCase()}`);
+
+  if (state.screen === "playing" || state.screen === "paused" || state.screen === "game_over") {
+    drawHudLayer(ctx, state);
+  }
+
+  if (state.screen === "title") {
+    drawTitleScreen(ctx);
+  } else if (state.screen === "map_select") {
+    drawMapSelectScreen(ctx, state);
+  } else if (state.screen === "difficulty_select") {
+    drawDifficultySelectScreen(ctx, state);
+  } else if (state.screen === "paused") {
     drawPausedOverlay(ctx);
-  } else if (state.mode === "game_over") {
+  } else if (state.screen === "game_over") {
     drawGameOverOverlay(ctx, state);
   }
 }
