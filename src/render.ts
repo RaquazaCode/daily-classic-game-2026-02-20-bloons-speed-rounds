@@ -7,30 +7,48 @@ import {
   START_BUTTON,
   TOWER_POSITION,
 } from "./constants";
-import type { GameState, Vec2 } from "./types";
+import type { Balloon, GameState, Vec2 } from "./types";
 
-function drawBackdrop(ctx: CanvasRenderingContext2D): void {
-  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  gradient.addColorStop(0, "#16384f");
-  gradient.addColorStop(0.55, "#0b2234");
-  gradient.addColorStop(1, "#06111c");
-  ctx.fillStyle = gradient;
+function drawBackgroundLayer(ctx: CanvasRenderingContext2D): void {
+  const sky = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  sky.addColorStop(0, "#0b2f30");
+  sky.addColorStop(0.35, "#0f473c");
+  sky.addColorStop(1, "#1a5a3b");
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  ctx.globalAlpha = 0.1;
-  for (let i = 0; i < 90; i += 1) {
-    const x = ((i * 83) % CANVAS_WIDTH) + 0.5;
-    const y = ((i * 47) % CANVAS_HEIGHT) + 0.5;
-    ctx.fillStyle = "#9ce3ff";
+  const fog = ctx.createRadialGradient(CANVAS_WIDTH * 0.7, CANVAS_HEIGHT * 0.1, 20, CANVAS_WIDTH * 0.7, CANVAS_HEIGHT * 0.1, 520);
+  fog.addColorStop(0, "rgba(255, 238, 176, 0.18)");
+  fog.addColorStop(1, "rgba(255, 238, 176, 0)");
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  ctx.globalAlpha = 0.16;
+  for (let i = 0; i < 120; i += 1) {
+    const x = ((i * 109) % CANVAS_WIDTH) + 0.5;
+    const y = ((i * 71) % CANVAS_HEIGHT) + 0.5;
+    ctx.fillStyle = i % 3 === 0 ? "#a0f9a8" : "#d7ffc8";
     ctx.fillRect(x, y, 2, 2);
   }
   ctx.globalAlpha = 1;
+
+  // Foliage silhouettes for a stronger Neo Jungle framing.
+  ctx.fillStyle = "rgba(5, 22, 17, 0.6)";
+  for (let i = 0; i < 16; i += 1) {
+    const x = i * 88 - 10;
+    const h = 120 + (i % 4) * 34;
+    ctx.beginPath();
+    ctx.moveTo(x, CANVAS_HEIGHT + 8);
+    ctx.quadraticCurveTo(x + 26, CANVAS_HEIGHT - h, x + 54, CANVAS_HEIGHT + 8);
+    ctx.fill();
+  }
 }
 
-function drawPath(ctx: CanvasRenderingContext2D): void {
-  ctx.lineWidth = 38;
+function drawPathLayer(ctx: CanvasRenderingContext2D): void {
   ctx.lineCap = "round";
-  ctx.strokeStyle = "rgba(254, 233, 154, 0.25)";
+
+  ctx.lineWidth = 42;
+  ctx.strokeStyle = "rgba(65, 90, 58, 0.58)";
   ctx.beginPath();
   ctx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
   for (const point of PATH_POINTS.slice(1)) {
@@ -38,56 +56,124 @@ function drawPath(ctx: CanvasRenderingContext2D): void {
   }
   ctx.stroke();
 
-  ctx.lineWidth = 10;
-  ctx.strokeStyle = "rgba(255, 246, 192, 0.85)";
+  const lane = ctx.createLinearGradient(120, 575, 1125, 205);
+  lane.addColorStop(0, "#f5d68f");
+  lane.addColorStop(1, "#d4b06a");
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = lane;
   ctx.beginPath();
   ctx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
   for (const point of PATH_POINTS.slice(1)) {
     ctx.lineTo(point.x, point.y);
   }
   ctx.stroke();
+
+  ctx.setLineDash([11, 12]);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(80, 53, 19, 0.42)";
+  ctx.beginPath();
+  ctx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
+  for (const point of PATH_POINTS.slice(1)) {
+    ctx.lineTo(point.x, point.y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
-function drawTower(ctx: CanvasRenderingContext2D): void {
+function drawTowerLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.save();
   ctx.translate(TOWER_POSITION.x, TOWER_POSITION.y);
 
-  ctx.fillStyle = "#1f2d3f";
+  ctx.fillStyle = "#122744";
   ctx.beginPath();
-  ctx.arc(0, 0, 30, 0, Math.PI * 2);
+  ctx.arc(0, 0, 36, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#f7d14b";
+  ctx.fillStyle = "#f2d051";
   ctx.beginPath();
-  ctx.arc(0, -8, 13, 0, Math.PI * 2);
+  ctx.arc(0, -11, 16, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#324a63";
-  ctx.fillRect(-8, -44, 16, 34);
+  ctx.fillStyle = "#335775";
+  ctx.fillRect(-10, -52, 20, 40);
+
+  if (state.muzzleFlashMs > 0) {
+    const alpha = state.muzzleFlashMs / 120;
+    ctx.fillStyle = `rgba(255, 246, 173, ${0.45 * alpha})`;
+    ctx.beginPath();
+    ctx.arc(0, -46, 30 * alpha + 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(255, 210, 120, ${0.8 * alpha})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -46);
+    ctx.lineTo(-14, -78);
+    ctx.moveTo(0, -46);
+    ctx.lineTo(14, -78);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
-function drawBalloons(ctx: CanvasRenderingContext2D, state: GameState): void {
+function drawColorblindMarker(ctx: CanvasRenderingContext2D, balloon: Balloon): void {
+  ctx.save();
+  ctx.translate(balloon.x, balloon.y);
+  ctx.strokeStyle = "rgba(5, 20, 29, 0.7)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
+  ctx.lineWidth = 2;
+
+  if (balloon.marker === "dot") {
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (balloon.marker === "ring") {
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (balloon.marker === "stripe") {
+    ctx.beginPath();
+    ctx.moveTo(-7, -6);
+    ctx.lineTo(7, 6);
+    ctx.moveTo(-7, -1);
+    ctx.lineTo(7, 11);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(6, 0);
+    ctx.moveTo(0, -6);
+    ctx.lineTo(0, 6);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawBalloonsLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
   for (const balloon of state.balloons) {
     ctx.fillStyle = balloon.color;
     ctx.beginPath();
     ctx.arc(balloon.x, balloon.y, balloon.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(14, 20, 27, 0.5)";
+    ctx.strokeStyle = "rgba(16, 28, 34, 0.6)";
     ctx.lineWidth = 2;
     ctx.stroke();
 
+    drawColorblindMarker(ctx, balloon);
+
     ctx.beginPath();
-    ctx.strokeStyle = "rgba(31, 40, 52, 0.55)";
+    ctx.strokeStyle = "rgba(17, 39, 44, 0.55)";
     ctx.moveTo(balloon.x, balloon.y + balloon.radius);
     ctx.lineTo(balloon.x, balloon.y + balloon.radius + 11);
     ctx.stroke();
   }
 }
 
-function drawDarts(ctx: CanvasRenderingContext2D, state: GameState): void {
-  ctx.fillStyle = "#eaf6ff";
+function drawProjectilesLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
+  ctx.fillStyle = "#ecf8ff";
   for (const dart of state.darts) {
     ctx.beginPath();
     ctx.arc(dart.x, dart.y, dart.radius, 0, Math.PI * 2);
@@ -95,42 +181,78 @@ function drawDarts(ctx: CanvasRenderingContext2D, state: GameState): void {
   }
 }
 
+function drawEffectsLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
+  for (const particle of state.particles) {
+    const alpha = Math.max(0.12, Math.min(1, particle.ttlMs / 260));
+    ctx.fillStyle = particle.color.replace("#", "#");
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  if (state.hitMarkerMs > 0) {
+    const scale = 1 + (1 - state.hitMarkerMs / 180) * 0.6;
+    const alpha = state.hitMarkerMs / 180;
+    ctx.save();
+    ctx.translate(state.hitMarkerX, state.hitMarkerY);
+    ctx.strokeStyle = `rgba(255, 245, 193, ${alpha})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 10 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (state.scoreTickMs > 0 && state.scoreTickValue > 0) {
+    const progress = 1 - state.scoreTickMs / 560;
+    const yOffset = progress * 32;
+    ctx.fillStyle = "rgba(255, 251, 212, 0.95)";
+    ctx.font = "700 28px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.fillText(`+${state.scoreTickValue}`, state.hitMarkerX + 18, state.hitMarkerY - 16 - yOffset);
+  }
+}
+
 function drawHudPanel(ctx: CanvasRenderingContext2D, label: string, value: string, x: number, y: number): void {
-  ctx.fillStyle = "rgba(5, 16, 27, 0.65)";
+  ctx.fillStyle = "rgba(7, 27, 31, 0.72)";
   ctx.fillRect(x, y, 178, 56);
 
-  ctx.strokeStyle = "rgba(125, 198, 239, 0.48)";
+  ctx.strokeStyle = "rgba(143, 227, 188, 0.54)";
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, 178, 56);
 
-  ctx.fillStyle = "#94d8ff";
+  ctx.fillStyle = "#9df7ca";
   ctx.font = "600 15px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillText(label, x + 12, y + 22);
 
-  ctx.fillStyle = "#fff7c9";
+  ctx.fillStyle = "#fff7d1";
   ctx.font = "700 20px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillText(value, x + 12, y + 44);
 }
 
-function drawHeader(ctx: CanvasRenderingContext2D): void {
-  ctx.fillStyle = "rgba(6, 19, 31, 0.72)";
+function drawHeaderLayer(ctx: CanvasRenderingContext2D): void {
+  const headerGradient = ctx.createLinearGradient(0, 0, CANVAS_WIDTH, 0);
+  headerGradient.addColorStop(0, "rgba(8, 33, 33, 0.88)");
+  headerGradient.addColorStop(1, "rgba(17, 59, 46, 0.88)");
+  ctx.fillStyle = headerGradient;
   ctx.fillRect(0, 0, CANVAS_WIDTH, 74);
 
-  ctx.fillStyle = "#f7d14b";
+  ctx.fillStyle = "#ffd565";
   ctx.font = "700 30px 'Bungee', 'Trebuchet MS', sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(GAME_TITLE, CANVAS_WIDTH / 2, 46);
+  ctx.fillText(`${GAME_TITLE} • Neo Jungle`, CANVAS_WIDTH / 2, 46);
   ctx.textAlign = "left";
 }
 
 function drawButton(ctx: CanvasRenderingContext2D, label: string, center: Vec2): void {
-  ctx.fillStyle = "#f7d14b";
+  ctx.fillStyle = "#f3d46d";
   ctx.fillRect(center.x - 160, center.y - 34, 320, 68);
-  ctx.strokeStyle = "#fff6c5";
+  ctx.strokeStyle = "#fff7cb";
   ctx.lineWidth = 2;
   ctx.strokeRect(center.x - 160, center.y - 34, 320, 68);
 
-  ctx.fillStyle = "#142235";
+  ctx.fillStyle = "#1a2f27";
   ctx.textAlign = "center";
   ctx.font = "700 28px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillText(label, center.x, center.y + 10);
@@ -138,43 +260,43 @@ function drawButton(ctx: CanvasRenderingContext2D, label: string, center: Vec2):
 }
 
 function drawTitleOverlay(ctx: CanvasRenderingContext2D): void {
-  ctx.fillStyle = "rgba(4, 11, 20, 0.75)";
+  ctx.fillStyle = "rgba(6, 18, 15, 0.78)";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  ctx.fillStyle = "#fff7c9";
+  ctx.fillStyle = "#fff6cc";
   ctx.font = "700 52px 'Bungee', 'Trebuchet MS', sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("Speed-Rounds Challenge", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 38);
+  ctx.fillText("Speed-Rounds Jungle", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 38);
 
   ctx.font = "600 24px 'Barlow', 'Trebuchet MS', sans-serif";
-  ctx.fillStyle = "#9fdfff";
-  ctx.fillText("Pop balloon waves. Every 20 seconds, speed rounds go wild.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
+  ctx.fillStyle = "#aceac9";
+  ctx.fillText("Pop waves with reactive FX and deterministic timing.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
 
   drawButton(ctx, "Start Game", { x: START_BUTTON.x + START_BUTTON.width / 2, y: START_BUTTON.y + START_BUTTON.height / 2 });
   ctx.textAlign = "left";
 }
 
 function drawPausedOverlay(ctx: CanvasRenderingContext2D): void {
-  ctx.fillStyle = "rgba(4, 11, 20, 0.62)";
+  ctx.fillStyle = "rgba(4, 14, 12, 0.64)";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
   ctx.textAlign = "center";
-  ctx.fillStyle = "#fff7c9";
+  ctx.fillStyle = "#fff6cc";
   ctx.font = "700 64px 'Bungee', 'Trebuchet MS', sans-serif";
   ctx.fillText("Paused", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
 
-  ctx.fillStyle = "#9fdfff";
+  ctx.fillStyle = "#9ae9c0";
   ctx.font = "600 22px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillText("Press P to continue", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 48);
   ctx.textAlign = "left";
 }
 
 function drawGameOverOverlay(ctx: CanvasRenderingContext2D, state: GameState): void {
-  ctx.fillStyle = "rgba(10, 7, 15, 0.75)";
+  ctx.fillStyle = "rgba(12, 14, 16, 0.76)";
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
   ctx.textAlign = "center";
-  ctx.fillStyle = "#ffd15c";
+  ctx.fillStyle = "#ffd56f";
   ctx.font = "700 58px 'Bungee', 'Trebuchet MS', sans-serif";
   ctx.fillText("Round Lost", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 18);
 
@@ -186,38 +308,42 @@ function drawGameOverOverlay(ctx: CanvasRenderingContext2D, state: GameState): v
   ctx.textAlign = "left";
 }
 
-export function renderGame(ctx: CanvasRenderingContext2D, state: GameState): void {
-  drawBackdrop(ctx);
-  drawPath(ctx);
-  drawTower(ctx);
-  drawBalloons(ctx, state);
-  drawDarts(ctx, state);
-  drawHeader(ctx);
-
+function drawHudLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
   drawHudPanel(ctx, "Score", String(state.score), 20, 86);
   drawHudPanel(ctx, "Lives", String(state.lives), 214, 86);
   drawHudPanel(ctx, "Wave", String(state.wave), 408, 86);
   drawHudPanel(ctx, "Popped", String(state.poppedTotal), 602, 86);
 
   if (state.speedRoundActive) {
-    ctx.fillStyle = "rgba(252, 120, 67, 0.78)";
+    ctx.fillStyle = "rgba(238, 129, 72, 0.86)";
     ctx.fillRect(796, 90, 466, 48);
     ctx.fillStyle = "#fffbde";
     ctx.font = "700 24px 'Barlow', 'Trebuchet MS', sans-serif";
     const endsIn = Math.max(0, Math.ceil((state.speedRoundEndsAtMs - state.elapsedMs) / 1000));
     ctx.fillText(`SPEED ROUND x${SPEED_ROUND_SCORE_MULTIPLIER} SCORE • ${endsIn}s`, 814, 121);
   } else {
-    ctx.fillStyle = "rgba(13, 31, 48, 0.74)";
+    ctx.fillStyle = "rgba(8, 44, 39, 0.8)";
     ctx.fillRect(796, 90, 466, 48);
-    ctx.fillStyle = "#9fdfff";
+    ctx.fillStyle = "#aef0d3";
     ctx.font = "600 22px 'Barlow', 'Trebuchet MS', sans-serif";
     const startsIn = Math.max(0, Math.ceil((state.nextSpeedRoundAtMs - state.elapsedMs) / 1000));
     ctx.fillText(`Next speed round in ${startsIn}s`, 816, 121);
   }
 
-  ctx.fillStyle = "#d8f0ff";
+  ctx.fillStyle = "#d8ffe9";
   ctx.font = "600 18px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillText("Controls: Click to shoot • P pause • R restart • F fullscreen", 22, CANVAS_HEIGHT - 20);
+}
+
+export function renderGame(ctx: CanvasRenderingContext2D, state: GameState): void {
+  drawBackgroundLayer(ctx);
+  drawPathLayer(ctx);
+  drawTowerLayer(ctx, state);
+  drawBalloonsLayer(ctx, state);
+  drawProjectilesLayer(ctx, state);
+  drawEffectsLayer(ctx, state);
+  drawHeaderLayer(ctx);
+  drawHudLayer(ctx, state);
 
   if (state.mode === "title") {
     drawTitleOverlay(ctx);

@@ -24,8 +24,14 @@ assert(gameSource.includes("updateGame"), "update loop missing");
 assert(gameSource.includes("SPEED_ROUND_INTERVAL_MS"), "speed round interval constant not used");
 assert(gameSource.includes("fireGuidedDartAtLeadBalloon"), "deterministic scripted dart path missing");
 assert(gameSource.includes("renderGameToText"), "render hook serializer missing");
+assert(gameSource.includes("dartPool"), "projectile object pooling missing");
+assert(gameSource.includes("particlePool"), "particle object pooling missing");
+assert(gameSource.includes("spawnPopParticles"), "pop particle effect missing");
+assert(gameSource.includes("hitMarkerMs"), "hit marker feedback missing");
 
 assert(renderSource.includes("Speed round") || renderSource.includes("speed round"), "speed round HUD text missing");
+assert(renderSource.includes("drawEffectsLayer"), "layered renderer effect pass missing");
+assert(renderSource.includes("drawColorblindMarker"), "colorblind-safe balloon markers missing");
 assert(inputSource.includes("isStartButtonHit"), "start button targeting missing");
 
 console.log("Self-check passed: deterministic loop, hooks, speed rounds, and scripted path are present.");
