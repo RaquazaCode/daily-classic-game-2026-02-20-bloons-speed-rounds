@@ -1,5 +1,11 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@500;600;700&family=Bungee&display=swap");
+
 :root {
-  color-scheme: dark;
+  --sky-top: #1b4f70;
+  --sky-bottom: #0a1624;
+  --frame: #0d2034;
+  --frame-edge: #8dd6ff;
+  --text-main: #f8f5d2;
 }
 
 * {
@@ -8,13 +14,16 @@
 
 html,
 body {
-  margin: 0;
   width: 100%;
   height: 100%;
+  margin: 0;
   overflow: hidden;
-  font-family: "Trebuchet MS", "Verdana", sans-serif;
-  background: radial-gradient(circle at top, #17222d, #070b10 58%, #020305 100%);
-  color: #f6f2c4;
+  background: radial-gradient(circle at 20% 12%, var(--sky-top), var(--sky-bottom) 55%, #050b12 100%);
+}
+
+body {
+  font-family: "Barlow", "Trebuchet MS", sans-serif;
+  color: var(--text-main);
 }
 
 #app {
@@ -22,8 +31,16 @@ body {
   height: 100%;
   display: grid;
   place-items: center;
+  padding: 14px;
 }
 
-.shell {
-  text-align: center;
+.game-canvas {
+  width: min(96vw, 1360px);
+  max-height: 96vh;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  border: 2px solid var(--frame-edge);
+  background: linear-gradient(180deg, #173a56, #091829 62%, #060d16 100%);
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(220, 244, 255, 0.08);
+  touch-action: none;
 }

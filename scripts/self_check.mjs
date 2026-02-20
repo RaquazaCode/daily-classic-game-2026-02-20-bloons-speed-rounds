@@ -2,8 +2,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
+
 const mainSource = readFileSync(resolve(root, "src/main.ts"), "utf8");
 const gameSource = readFileSync(resolve(root, "src/game.ts"), "utf8");
+const renderSource = readFileSync(resolve(root, "src/render.ts"), "utf8");
+const inputSource = readFileSync(resolve(root, "src/input.ts"), "utf8");
 
 function assert(condition, message) {
   if (!condition) {
@@ -14,7 +17,15 @@ function assert(condition, message) {
 
 assert(mainSource.includes("window.advanceTime"), "window.advanceTime hook missing");
 assert(mainSource.includes("window.render_game_to_text"), "window.render_game_to_text hook missing");
+assert(mainSource.includes("scripted_demo"), "scripted_demo mode missing");
+
 assert(gameSource.includes("speedRoundActive"), "speed round state missing");
 assert(gameSource.includes("updateGame"), "update loop missing");
+assert(gameSource.includes("SPEED_ROUND_INTERVAL_MS"), "speed round interval constant not used");
+assert(gameSource.includes("fireGuidedDartAtLeadBalloon"), "deterministic scripted dart path missing");
+assert(gameSource.includes("renderGameToText"), "render hook serializer missing");
 
-console.log("Self-check passed.");
+assert(renderSource.includes("Speed round") || renderSource.includes("speed round"), "speed round HUD text missing");
+assert(inputSource.includes("isStartButtonHit"), "start button targeting missing");
+
+console.log("Self-check passed: deterministic loop, hooks, speed rounds, and scripted path are present.");
