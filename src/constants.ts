@@ -29,6 +29,15 @@ export const WAVE_BALLOON_STEP = 4;
 export const DART_RADIUS = 8;
 export const DART_SPEED = 980;
 export const DART_LIFETIME_MS = 1400;
+export const DART_POOL_CAPACITY = 180;
+
+export const POP_PARTICLES_PER_BALLOON = 8;
+export const PARTICLE_POOL_CAPACITY = 512;
+export const MUZZLE_FLASH_DURATION_MS = 120;
+export const HIT_MARKER_DURATION_MS = 180;
+export const SCORE_TICK_DURATION_MS = 560;
+
+export const BALLOON_MARKERS = ["dot", "ring", "stripe", "cross"] as const;
 
 export const SPEED_ROUND_INTERVAL_MS = 20000;
 export const SPEED_ROUND_DURATION_MS = 8000;
