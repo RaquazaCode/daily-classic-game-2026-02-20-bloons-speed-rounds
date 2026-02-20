@@ -55,3 +55,18 @@ Deterministic proof snapshots:
 - Added selected course + difficulty persistence via `localStorage`.
 - `render_game_to_text` now includes `screen` and `selectedMapId`.
 - Runtime pathing is now map-driven (`state.pathPoints`) instead of fixed constants.
+
+## 2026-02-20 Overhaul Milestone 3
+- Branch: `codex/2026-02-20-bloons-overhaul-m3-progression`.
+- Added tower-defense progression systems and data modules:
+- `src/data/towers.ts`
+- `src/data/waves.ts`
+- `src/systems/towers.ts`
+- `src/systems/waves.ts`
+- Added economy + progression state:
+- coins, wave bonuses, unlock-by-wave tower gating, and per-tower upgrades.
+- Added 4 tower archetypes:
+- Dart Monkey, Tack Sprayer, Ice Tower, Sniper.
+- Added balloon tiers/resistances/health and difficulty-scaled wave plans.
+- Added tower placement hotkeys (`1`-`4`) and placement cancel (`0`), plus click-upgrade behavior.
+- Expanded snapshot payload with `coins`, `towersPlaced`, and `projectilesAlive`.
