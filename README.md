@@ -60,9 +60,6 @@ pnpm build
 - Pop scoring is multiplied by `2x`.
 - The top HUD turns orange and displays remaining speed-round time.
 
-## Project Location
-- `/Users/testaccountforsystem-wideissues/.codex/automations/daily-classic-game/games/2026-02-20-bloons-speed-rounds`
-
 ## Verification
 ```bash
 pnpm test
