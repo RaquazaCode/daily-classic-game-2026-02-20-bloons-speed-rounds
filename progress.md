@@ -44,3 +44,14 @@ Deterministic proof snapshots:
 - Added colorblind-safe balloon markers:
 - deterministic marker symbols (`dot`, `ring`, `stripe`, `cross`).
 - Refreshed Playwright artifacts after visual/gameplay updates.
+
+## 2026-02-20 Overhaul Milestone 2
+- Branch: `codex/2026-02-20-bloons-overhaul-m2-maps`.
+- Added menu state machine flow:
+- `title -> map_select -> difficulty_select -> playing`.
+- Added new data modules:
+- `src/data/maps.ts` with 3 course definitions and spawn/reward modifiers.
+- `src/ui/menu.ts` for deterministic hit-testing and menu layouts.
+- Added selected course + difficulty persistence via `localStorage`.
+- `render_game_to_text` now includes `screen` and `selectedMapId`.
+- Runtime pathing is now map-driven (`state.pathPoints`) instead of fixed constants.
