@@ -1,16 +1,23 @@
 import {
   BALLOON_BASE_SPEED,
   BALLOON_COLORS,
+  BALLOON_MARKERS,
   BALLOON_RADIUS,
   BALLOON_SPAWN_INTERVAL_MS,
   BASE_POP_SCORE,
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   DART_LIFETIME_MS,
+  DART_POOL_CAPACITY,
   DART_RADIUS,
   DART_SPEED,
   GAME_SEED,
+  HIT_MARKER_DURATION_MS,
+  MUZZLE_FLASH_DURATION_MS,
   PATH_POINTS,
+  PARTICLE_POOL_CAPACITY,
+  POP_PARTICLES_PER_BALLOON,
+  SCORE_TICK_DURATION_MS,
   SCRIPTED_SHOT_TIMINGS_MS,
   SPEED_ROUND_BALLOON_MULTIPLIER,
   SPEED_ROUND_DURATION_MS,
@@ -23,7 +30,7 @@ import {
 } from "./constants";
 import { circlesOverlap } from "./collision";
 import { seededRandom } from "./rng";
-import type { Balloon, Dart, GameSnapshot, GameState, PathSegment, PendingEvent, Vec2 } from "./types";
+import type { Balloon, Dart, GameSnapshot, GameState, Particle, PathSegment, PendingEvent, Vec2 } from "./types";
 
 const MAX_PENDING_EVENTS = 8;
 
@@ -91,12 +98,67 @@ function nextColor(state: GameState): string {
   return BALLOON_COLORS[index];
 }
 
+function nextMarker(state: GameState): Balloon["marker"] {
+  const index = Math.floor(state.rng() * BALLOON_MARKERS.length) % BALLOON_MARKERS.length;
+  return BALLOON_MARKERS[index];
+}
+
 function speedMultiplier(state: GameState): number {
   return state.speedRoundActive ? SPEED_ROUND_BALLOON_MULTIPLIER : 1;
 }
 
 function scoreMultiplier(state: GameState): number {
   return state.speedRoundActive ? SPEED_ROUND_SCORE_MULTIPLIER : 1;
+}
+
+function acquireDart(state: GameState): Dart {
+  const existing = state.dartPool.pop();
+  if (existing) {
+    return existing;
+  }
+
+  return {
+    id: 0,
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    radius: DART_RADIUS,
+    ttlMs: DART_LIFETIME_MS,
+    targetBalloonId: null,
+  };
+}
+
+function releaseDart(state: GameState, dart: Dart): void {
+  if (state.dartPool.length >= DART_POOL_CAPACITY) {
+    return;
+  }
+  state.dartPool.push(dart);
+}
+
+function acquireParticle(state: GameState): Particle {
+  const existing = state.particlePool.pop();
+  if (existing) {
+    return existing;
+  }
+
+  return {
+    id: 0,
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    ttlMs: 0,
+    radius: 3,
+    color: "#ffffff",
+  };
+}
+
+function releaseParticle(state: GameState, particle: Particle): void {
+  if (state.particlePool.length >= PARTICLE_POOL_CAPACITY) {
+    return;
+  }
+  state.particlePool.push(particle);
 }
 
 function spawnBalloon(state: GameState): void {
@@ -116,6 +178,7 @@ function spawnBalloon(state: GameState): void {
     distance: 0,
     speed: BALLOON_BASE_SPEED * waveBoost * speedVariance,
     color: nextColor(state),
+    marker: nextMarker(state),
   };
 
   state.nextEntityId += 1;
@@ -137,6 +200,33 @@ function updateSpeedRoundWindow(state: GameState): void {
   }
 }
 
+function spawnPopParticles(state: GameState, x: number, y: number, color: string): void {
+  for (let index = 0; index < POP_PARTICLES_PER_BALLOON; index += 1) {
+    const angle = (Math.PI * 2 * index) / POP_PARTICLES_PER_BALLOON + state.rng() * 0.4;
+    const speed = 90 + state.rng() * 120;
+    const particle = acquireParticle(state);
+    particle.id = state.nextEntityId;
+    particle.x = x;
+    particle.y = y;
+    particle.vx = Math.cos(angle) * speed;
+    particle.vy = Math.sin(angle) * speed;
+    particle.ttlMs = 180 + state.rng() * 220;
+    particle.radius = 2.6 + state.rng() * 2.1;
+    particle.color = color;
+    state.nextEntityId += 1;
+    state.particles.push(particle);
+  }
+}
+
+function tickFeedback(state: GameState, deltaMs: number): void {
+  state.muzzleFlashMs = Math.max(0, state.muzzleFlashMs - deltaMs);
+  state.hitMarkerMs = Math.max(0, state.hitMarkerMs - deltaMs);
+  state.scoreTickMs = Math.max(0, state.scoreTickMs - deltaMs);
+  if (state.scoreTickMs === 0) {
+    state.scoreTickValue = 0;
+  }
+}
+
 export function createInitialState(seed = GAME_SEED, scriptedDemo = false): GameState {
   return {
     mode: "title",
@@ -149,6 +239,9 @@ export function createInitialState(seed = GAME_SEED, scriptedDemo = false): Game
     nextSpeedRoundAtMs: SPEED_ROUND_INTERVAL_MS,
     balloons: [],
     darts: [],
+    dartPool: [],
+    particles: [],
+    particlePool: [],
     poppedTotal: 0,
     pendingEvents: [],
     seed,
@@ -158,6 +251,12 @@ export function createInitialState(seed = GAME_SEED, scriptedDemo = false): Game
     spawnedInWave: 0,
     waveTargetCount: calcWaveTargetCount(1),
     nextEntityId: 1,
+    muzzleFlashMs: 0,
+    hitMarkerMs: 0,
+    hitMarkerX: TOWER_POSITION.x,
+    hitMarkerY: TOWER_POSITION.y,
+    scoreTickValue: 0,
+    scoreTickMs: 0,
     rng: seededRandom(seed),
   };
 }
@@ -198,19 +297,19 @@ export function fireDartAt(
     return;
   }
 
-  const dart: Dart = {
-    id: state.nextEntityId,
-    x: TOWER_POSITION.x,
-    y: TOWER_POSITION.y,
-    vx: (dx / magnitude) * DART_SPEED,
-    vy: (dy / magnitude) * DART_SPEED,
-    radius: DART_RADIUS,
-    ttlMs: DART_LIFETIME_MS,
-    targetBalloonId,
-  };
+  const dart = acquireDart(state);
+  dart.id = state.nextEntityId;
+  dart.x = TOWER_POSITION.x;
+  dart.y = TOWER_POSITION.y;
+  dart.vx = (dx / magnitude) * DART_SPEED;
+  dart.vy = (dy / magnitude) * DART_SPEED;
+  dart.radius = DART_RADIUS;
+  dart.ttlMs = DART_LIFETIME_MS;
+  dart.targetBalloonId = targetBalloonId;
 
   state.nextEntityId += 1;
   state.darts.push(dart);
+  state.muzzleFlashMs = MUZZLE_FLASH_DURATION_MS;
 }
 
 function fireGuidedDartAtLeadBalloon(state: GameState): void {
@@ -268,6 +367,7 @@ function updateDarts(state: GameState, deltaSeconds: number, deltaMs: number): v
   for (const dart of state.darts) {
     dart.ttlMs -= deltaMs;
     if (dart.ttlMs <= 0) {
+      releaseDart(state, dart);
       continue;
     }
 
@@ -289,6 +389,7 @@ function updateDarts(state: GameState, deltaSeconds: number, deltaMs: number): v
 
     const outOfBounds = dart.x < -40 || dart.x > CANVAS_WIDTH + 40 || dart.y < -40 || dart.y > CANVAS_HEIGHT + 40;
     if (outOfBounds) {
+      releaseDart(state, dart);
       continue;
     }
 
@@ -298,6 +399,27 @@ function updateDarts(state: GameState, deltaSeconds: number, deltaMs: number): v
   state.darts = survivors;
 }
 
+function updateParticles(state: GameState, deltaSeconds: number, deltaMs: number): void {
+  const survivors: Particle[] = [];
+
+  for (const particle of state.particles) {
+    particle.ttlMs -= deltaMs;
+    if (particle.ttlMs <= 0) {
+      releaseParticle(state, particle);
+      continue;
+    }
+
+    particle.x += particle.vx * deltaSeconds;
+    particle.y += particle.vy * deltaSeconds;
+    particle.vx *= 0.93;
+    particle.vy *= 0.93;
+
+    survivors.push(particle);
+  }
+
+  state.particles = survivors;
+}
+
 function resolveCollisions(state: GameState): void {
   if (state.darts.length === 0 || state.balloons.length === 0) {
     return;
@@ -305,6 +427,7 @@ function resolveCollisions(state: GameState): void {
 
   const balloonIdsToRemove = new Set<number>();
   const dartIdsToRemove = new Set<number>();
+  const poppedBalloons: Balloon[] = [];
 
   for (const dart of state.darts) {
     if (dartIdsToRemove.has(dart.id)) {
@@ -319,6 +442,7 @@ function resolveCollisions(state: GameState): void {
       if (circlesOverlap(dart.x, dart.y, dart.radius, balloon.x, balloon.y, balloon.radius)) {
         balloonIdsToRemove.add(balloon.id);
         dartIdsToRemove.add(dart.id);
+        poppedBalloons.push(balloon);
         break;
       }
     }
@@ -329,11 +453,30 @@ function resolveCollisions(state: GameState): void {
   }
 
   state.balloons = state.balloons.filter((balloon) => !balloonIdsToRemove.has(balloon.id));
-  state.darts = state.darts.filter((dart) => !dartIdsToRemove.has(dart.id));
+
+  const remainingDarts: Dart[] = [];
+  for (const dart of state.darts) {
+    if (dartIdsToRemove.has(dart.id)) {
+      releaseDart(state, dart);
+      continue;
+    }
+    remainingDarts.push(dart);
+  }
+  state.darts = remainingDarts;
+
+  for (const balloon of poppedBalloons) {
+    spawnPopParticles(state, balloon.x, balloon.y, balloon.color);
+  }
 
   const poppedCount = balloonIdsToRemove.size;
+  const scoreDelta = Math.round(BASE_POP_SCORE * scoreMultiplier(state) * poppedCount);
   state.poppedTotal += poppedCount;
-  state.score += Math.round(BASE_POP_SCORE * scoreMultiplier(state) * poppedCount);
+  state.score += scoreDelta;
+  state.hitMarkerMs = HIT_MARKER_DURATION_MS;
+  state.hitMarkerX = poppedBalloons[0].x;
+  state.hitMarkerY = poppedBalloons[0].y;
+  state.scoreTickValue = scoreDelta;
+  state.scoreTickMs = SCORE_TICK_DURATION_MS;
   appendEvent(state, "pop", `x${poppedCount} score:${state.score}`);
 }
 
@@ -351,7 +494,12 @@ function maybeStartNextWave(state: GameState): void {
 }
 
 export function updateGame(state: GameState, deltaMs: number): void {
-  if (state.mode !== "playing" || deltaMs <= 0) {
+  if (deltaMs <= 0) {
+    return;
+  }
+
+  if (state.mode !== "playing") {
+    tickFeedback(state, deltaMs);
     return;
   }
 
@@ -372,7 +520,9 @@ export function updateGame(state: GameState, deltaMs: number): void {
   updateDarts(state, deltaSeconds, deltaMs);
   updateBalloons(state, deltaSeconds);
   resolveCollisions(state);
+  updateParticles(state, deltaSeconds, deltaMs);
   updateSpeedRoundWindow(state);
+  tickFeedback(state, deltaMs);
 
   if (state.lives <= 0) {
     state.mode = "game_over";

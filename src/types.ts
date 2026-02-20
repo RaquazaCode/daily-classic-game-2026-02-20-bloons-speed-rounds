@@ -19,6 +19,7 @@ export interface Balloon {
   distance: number;
   speed: number;
   color: string;
+  marker: "dot" | "ring" | "stripe" | "cross";
 }
 
 export interface Dart {
@@ -30,6 +31,17 @@ export interface Dart {
   radius: number;
   ttlMs: number;
   targetBalloonId: number | null;
+}
+
+export interface Particle {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  ttlMs: number;
+  radius: number;
+  color: string;
 }
 
 export interface PendingEvent {
@@ -49,6 +61,9 @@ export interface GameState {
   nextSpeedRoundAtMs: number;
   balloons: Balloon[];
   darts: Dart[];
+  dartPool: Dart[];
+  particles: Particle[];
+  particlePool: Particle[];
   poppedTotal: number;
   pendingEvents: PendingEvent[];
   seed: string;
@@ -58,6 +73,12 @@ export interface GameState {
   spawnedInWave: number;
   waveTargetCount: number;
   nextEntityId: number;
+  muzzleFlashMs: number;
+  hitMarkerMs: number;
+  hitMarkerX: number;
+  hitMarkerY: number;
+  scoreTickValue: number;
+  scoreTickMs: number;
   rng: () => number;
 }
 

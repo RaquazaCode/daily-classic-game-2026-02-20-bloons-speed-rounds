@@ -30,3 +30,17 @@ Deterministic proof snapshots:
 - Merge PR with merge commit.
 - Run post-run hardening script.
 - Update automation catalog/state/queue/index/report files.
+
+## 2026-02-20 Overhaul Milestone 1
+- Branch: `codex/2026-02-20-bloons-overhaul-m1-theme`.
+- Implemented Neo Jungle renderer refactor with explicit layer passes:
+- background, path, tower/entities, effects, HUD, overlays.
+- Added responsive combat feedback:
+- muzzle flash at tower fire
+- pop particle bursts
+- hit marker pulse and score tick floaters
+- Added object pooling to reduce runtime allocation churn:
+- `dartPool` and `particlePool` in game state.
+- Added colorblind-safe balloon markers:
+- deterministic marker symbols (`dot`, `ring`, `stripe`, `cross`).
+- Refreshed Playwright artifacts after visual/gameplay updates.

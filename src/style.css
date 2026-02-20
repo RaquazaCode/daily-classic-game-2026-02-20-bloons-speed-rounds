@@ -1,11 +1,11 @@
 @import url("https://fonts.googleapis.com/css2?family=Barlow:wght@500;600;700&family=Bungee&display=swap");
 
 :root {
-  --sky-top: #1b4f70;
-  --sky-bottom: #0a1624;
-  --frame: #0d2034;
-  --frame-edge: #8dd6ff;
-  --text-main: #f8f5d2;
+  --jungle-top: #123f3a;
+  --jungle-bottom: #08211c;
+  --frame: #0d2e29;
+  --frame-edge: #8cf2c0;
+  --text-main: #f7f5d4;
 }
 
 * {
@@ -18,7 +18,10 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: radial-gradient(circle at 20% 12%, var(--sky-top), var(--sky-bottom) 55%, #050b12 100%);
+  background:
+    radial-gradient(circle at 18% 10%, rgba(173, 255, 192, 0.2), transparent 44%),
+    radial-gradient(circle at 82% 84%, rgba(255, 219, 136, 0.17), transparent 46%),
+    linear-gradient(180deg, var(--jungle-top), var(--jungle-bottom) 65%, #051612 100%);
 }
 
 body {
@@ -38,9 +41,12 @@ body {
   width: min(96vw, 1360px);
   max-height: 96vh;
   aspect-ratio: 16 / 9;
-  border-radius: 16px;
+  border-radius: 18px;
   border: 2px solid var(--frame-edge);
-  background: linear-gradient(180deg, #173a56, #091829 62%, #060d16 100%);
-  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(220, 244, 255, 0.08);
+  background: linear-gradient(180deg, #164c42, #0f322d 65%, #071b16 100%);
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.56),
+    inset 0 0 0 1px rgba(220, 255, 238, 0.08),
+    0 0 0 6px rgba(12, 56, 45, 0.35);
   touch-action: none;
 }
