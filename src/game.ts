@@ -14,7 +14,6 @@ import {
   GAME_SEED,
   HIT_MARKER_DURATION_MS,
   MUZZLE_FLASH_DURATION_MS,
-  PATH_POINTS,
   PARTICLE_POOL_CAPACITY,
   POP_PARTICLES_PER_BALLOON,
   SCORE_TICK_DURATION_MS,
@@ -29,8 +28,19 @@ import {
   WAVE_BASE_BALLOONS,
 } from "./constants";
 import { circlesOverlap } from "./collision";
+import { DEFAULT_MAP_ID, DIFFICULTY_MODIFIERS, getMapById } from "./data/maps";
 import { seededRandom } from "./rng";
-import type { Balloon, Dart, GameSnapshot, GameState, Particle, PathSegment, PendingEvent, Vec2 } from "./types";
+import type {
+  Balloon,
+  Dart,
+  DifficultyChoice,
+  GameSnapshot,
+  GameState,
+  Particle,
+  PathSegment,
+  PendingEvent,
+  Vec2,
+} from "./types";
 
 const MAX_PENDING_EVENTS = 8;
 
@@ -39,7 +49,12 @@ interface PathInfo {
   totalLength: number;
 }
 
-const PATH_INFO = buildPathInfo(PATH_POINTS);
+interface RunModifiers {
+  speedMultiplier: number;
+  intervalMultiplier: number;
+  waveSizeMultiplier: number;
+  rewardMultiplier: number;
+}
 
 function buildPathInfo(points: readonly Vec2[]): PathInfo {
   const segments: PathSegment[] = [];
@@ -58,17 +73,17 @@ function buildPathInfo(points: readonly Vec2[]): PathInfo {
   return { segments, totalLength };
 }
 
-function pointOnPath(distance: number): Vec2 {
+function pointOnPath(state: GameState, distance: number): Vec2 {
   if (distance <= 0) {
-    return { ...PATH_INFO.segments[0].start };
+    return { ...state.pathSegments[0].start };
   }
 
-  if (distance >= PATH_INFO.totalLength) {
-    return { ...PATH_INFO.segments[PATH_INFO.segments.length - 1].end };
+  if (distance >= state.pathTotalLength) {
+    return { ...state.pathSegments[state.pathSegments.length - 1].end };
   }
 
   let traversed = 0;
-  for (const segment of PATH_INFO.segments) {
+  for (const segment of state.pathSegments) {
     if (traversed + segment.length >= distance) {
       const local = (distance - traversed) / segment.length;
       return {
@@ -79,11 +94,23 @@ function pointOnPath(distance: number): Vec2 {
     traversed += segment.length;
   }
 
-  return { ...PATH_INFO.segments[PATH_INFO.segments.length - 1].end };
+  return { ...state.pathSegments[state.pathSegments.length - 1].end };
 }
 
-function calcWaveTargetCount(wave: number): number {
-  return WAVE_BASE_BALLOONS + Math.max(0, wave - 1) * WAVE_BALLOON_STEP;
+function getRunModifiers(state: GameState): RunModifiers {
+  const map = getMapById(state.selectedMapId);
+  const difficulty = DIFFICULTY_MODIFIERS[state.selectedDifficulty];
+  return {
+    speedMultiplier: map.spawnModifiers.speedMultiplier * difficulty.speedMultiplier,
+    intervalMultiplier: map.spawnModifiers.intervalMultiplier * difficulty.intervalMultiplier,
+    waveSizeMultiplier: map.spawnModifiers.waveSizeMultiplier * difficulty.waveSizeMultiplier,
+    rewardMultiplier: map.rewardMultiplier * difficulty.rewardMultiplier,
+  };
+}
+
+function calcWaveTargetCount(wave: number, waveSizeMultiplier: number): number {
+  const baseline = WAVE_BASE_BALLOONS + Math.max(0, wave - 1) * WAVE_BALLOON_STEP;
+  return Math.max(4, Math.round(baseline * waveSizeMultiplier));
 }
 
 function appendEvent(state: GameState, type: PendingEvent["type"], note: string): void {
@@ -161,12 +188,58 @@ function releaseParticle(state: GameState, particle: Particle): void {
   state.particlePool.push(particle);
 }
 
+function applyPathForMap(state: GameState, mapId: string): void {
+  const map = getMapById(mapId);
+  const pathPoints = map.pathPoints.map((point) => ({ ...point }));
+  const path = buildPathInfo(pathPoints);
+  state.selectedMapId = map.id;
+  state.pathPoints = pathPoints;
+  state.pathSegments = path.segments;
+  state.pathTotalLength = path.totalLength;
+}
+
+function resetRunProgress(state: GameState): void {
+  const modifiers = getRunModifiers(state);
+  state.score = 0;
+  state.lives = START_LIVES;
+  state.wave = 1;
+  state.elapsedMs = 0;
+  state.speedRoundActive = false;
+  state.speedRoundEndsAtMs = 0;
+  state.nextSpeedRoundAtMs = SPEED_ROUND_INTERVAL_MS;
+  state.balloons = [];
+
+  for (const dart of state.darts) {
+    releaseDart(state, dart);
+  }
+  state.darts = [];
+
+  for (const particle of state.particles) {
+    releaseParticle(state, particle);
+  }
+  state.particles = [];
+
+  state.poppedTotal = 0;
+  state.pendingEvents = [];
+  state.scriptedShotCursor = 0;
+  state.spawnCooldownMs = 0;
+  state.spawnedInWave = 0;
+  state.waveTargetCount = calcWaveTargetCount(1, modifiers.waveSizeMultiplier);
+  state.muzzleFlashMs = 0;
+  state.hitMarkerMs = 0;
+  state.hitMarkerX = TOWER_POSITION.x;
+  state.hitMarkerY = TOWER_POSITION.y;
+  state.scoreTickValue = 0;
+  state.scoreTickMs = 0;
+}
+
 function spawnBalloon(state: GameState): void {
   if (state.spawnedInWave >= state.waveTargetCount) {
     return;
   }
 
-  const startPoint = pointOnPath(0);
+  const modifiers = getRunModifiers(state);
+  const startPoint = pointOnPath(state, 0);
   const waveBoost = 1 + (state.wave - 1) * 0.05;
   const speedVariance = 0.9 + state.rng() * 0.25;
 
@@ -176,7 +249,7 @@ function spawnBalloon(state: GameState): void {
     y: startPoint.y,
     radius: BALLOON_RADIUS,
     distance: 0,
-    speed: BALLOON_BASE_SPEED * waveBoost * speedVariance,
+    speed: BALLOON_BASE_SPEED * waveBoost * speedVariance * modifiers.speedMultiplier,
     color: nextColor(state),
     marker: nextMarker(state),
   };
@@ -227,11 +300,23 @@ function tickFeedback(state: GameState, deltaMs: number): void {
   }
 }
 
-export function createInitialState(seed = GAME_SEED, scriptedDemo = false): GameState {
-  return {
+export function createInitialState(
+  seed = GAME_SEED,
+  scriptedDemo = false,
+  selectedMapId = DEFAULT_MAP_ID,
+  selectedDifficulty: DifficultyChoice = "medium",
+): GameState {
+  const map = getMapById(selectedMapId);
+  const pathPoints = map.pathPoints.map((point) => ({ ...point }));
+  const path = buildPathInfo(pathPoints);
+
+  const initialState: GameState = {
     mode: "title",
+    screen: "title",
     score: 0,
     lives: START_LIVES,
+    selectedMapId: map.id,
+    selectedDifficulty,
     wave: 1,
     elapsedMs: 0,
     speedRoundActive: false,
@@ -249,8 +334,11 @@ export function createInitialState(seed = GAME_SEED, scriptedDemo = false): Game
     scriptedShotCursor: 0,
     spawnCooldownMs: 0,
     spawnedInWave: 0,
-    waveTargetCount: calcWaveTargetCount(1),
+    waveTargetCount: WAVE_BASE_BALLOONS,
     nextEntityId: 1,
+    pathPoints,
+    pathSegments: path.segments,
+    pathTotalLength: path.totalLength,
     muzzleFlashMs: 0,
     hitMarkerMs: 0,
     hitMarkerX: TOWER_POSITION.x,
@@ -259,23 +347,45 @@ export function createInitialState(seed = GAME_SEED, scriptedDemo = false): Game
     scoreTickMs: 0,
     rng: seededRandom(seed),
   };
+
+  resetRunProgress(initialState);
+  return initialState;
+}
+
+export function goToMapSelect(state: GameState): void {
+  state.screen = "map_select";
+  state.mode = "title";
+}
+
+export function selectMap(state: GameState, mapId: string): void {
+  applyPathForMap(state, mapId);
+  state.screen = "difficulty_select";
+  state.mode = "title";
+}
+
+export function selectDifficulty(state: GameState, difficulty: DifficultyChoice): void {
+  state.selectedDifficulty = difficulty;
 }
 
 export function startPlaying(state: GameState): void {
-  if (state.mode === "title" || state.mode === "game_over") {
-    state.mode = "playing";
-  }
+  resetRunProgress(state);
+  state.mode = "playing";
+  state.screen = "playing";
 }
 
-export function resetToTitle(seed: string, scriptedDemo: boolean): GameState {
-  return createInitialState(seed, scriptedDemo);
+export function resetToTitle(state: GameState): void {
+  resetRunProgress(state);
+  state.mode = "title";
+  state.screen = "title";
 }
 
 export function togglePause(state: GameState): void {
   if (state.mode === "playing") {
     state.mode = "paused";
+    state.screen = "paused";
   } else if (state.mode === "paused") {
     state.mode = "playing";
+    state.screen = "playing";
   }
 }
 
@@ -314,7 +424,8 @@ export function fireDartAt(
 
 function fireGuidedDartAtLeadBalloon(state: GameState): void {
   if (state.balloons.length === 0) {
-    fireDartAt(state, PATH_POINTS[1].x, PATH_POINTS[1].y, null);
+    const fallback = state.pathPoints[Math.min(1, state.pathPoints.length - 1)];
+    fireDartAt(state, fallback.x, fallback.y, null);
     return;
   }
 
@@ -344,13 +455,13 @@ function updateBalloons(state: GameState, deltaSeconds: number): void {
 
   for (const balloon of state.balloons) {
     const nextDistance = balloon.distance + balloon.speed * moveScale * deltaSeconds;
-    if (nextDistance >= PATH_INFO.totalLength) {
+    if (nextDistance >= state.pathTotalLength) {
       state.lives -= 1;
       appendEvent(state, "life_lost", `lives:${state.lives}`);
       continue;
     }
 
-    const point = pointOnPath(nextDistance);
+    const point = pointOnPath(state, nextDistance);
     balloon.distance = nextDistance;
     balloon.x = point.x;
     balloon.y = point.y;
@@ -469,7 +580,7 @@ function resolveCollisions(state: GameState): void {
   }
 
   const poppedCount = balloonIdsToRemove.size;
-  const scoreDelta = Math.round(BASE_POP_SCORE * scoreMultiplier(state) * poppedCount);
+  const scoreDelta = Math.round(BASE_POP_SCORE * scoreMultiplier(state) * poppedCount * getRunModifiers(state).rewardMultiplier);
   state.poppedTotal += poppedCount;
   state.score += scoreDelta;
   state.hitMarkerMs = HIT_MARKER_DURATION_MS;
@@ -487,7 +598,8 @@ function maybeStartNextWave(state: GameState): void {
   }
 
   state.wave += 1;
-  state.waveTargetCount = calcWaveTargetCount(state.wave);
+  const modifiers = getRunModifiers(state);
+  state.waveTargetCount = calcWaveTargetCount(state.wave, modifiers.waveSizeMultiplier);
   state.spawnedInWave = 0;
   state.spawnCooldownMs = 0;
   appendEvent(state, "wave_start", `wave:${state.wave}`);
@@ -506,10 +618,13 @@ export function updateGame(state: GameState, deltaMs: number): void {
   state.elapsedMs += deltaMs;
   updateSpeedRoundWindow(state);
 
+  const modifiers = getRunModifiers(state);
+  const spawnInterval = BALLOON_SPAWN_INTERVAL_MS * modifiers.intervalMultiplier;
+
   state.spawnCooldownMs += deltaMs;
-  while (state.spawnedInWave < state.waveTargetCount && state.spawnCooldownMs >= BALLOON_SPAWN_INTERVAL_MS) {
+  while (state.spawnedInWave < state.waveTargetCount && state.spawnCooldownMs >= spawnInterval) {
     spawnBalloon(state);
-    state.spawnCooldownMs -= BALLOON_SPAWN_INTERVAL_MS;
+    state.spawnCooldownMs -= spawnInterval;
   }
 
   if (state.scriptedDemo) {
@@ -526,6 +641,7 @@ export function updateGame(state: GameState, deltaMs: number): void {
 
   if (state.lives <= 0) {
     state.mode = "game_over";
+    state.screen = "game_over";
     appendEvent(state, "game_over", `score:${state.score}`);
     return;
   }
@@ -536,9 +652,11 @@ export function updateGame(state: GameState, deltaMs: number): void {
 export function snapshotState(state: GameState): GameSnapshot {
   return {
     mode: state.mode,
+    screen: state.screen,
     score: state.score,
     lives: state.lives,
     wave: state.wave,
+    selectedMapId: state.selectedMapId,
     elapsedMs: Math.round(state.elapsedMs),
     speedRoundActive: state.speedRoundActive,
     speedRoundEndsInMs: state.speedRoundActive ? Math.max(0, Math.round(state.speedRoundEndsAtMs - state.elapsedMs)) : 0,

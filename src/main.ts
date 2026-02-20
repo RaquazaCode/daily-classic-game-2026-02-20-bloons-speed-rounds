@@ -1,14 +1,64 @@
 import "./style.css";
 import { CANVAS_HEIGHT, CANVAS_WIDTH, FIXED_STEP_MS, GAME_SEED } from "./constants";
+import { DEFAULT_MAP_ID, MAP_DEFINITIONS } from "./data/maps";
 import { bindInput, isStartButtonHit } from "./input";
-import { createInitialState, fireDartAt, renderGameToText, resetToTitle, startPlaying, togglePause, updateGame } from "./game";
+import {
+  createInitialState,
+  fireDartAt,
+  goToMapSelect,
+  renderGameToText,
+  resetToTitle,
+  selectDifficulty,
+  selectMap,
+  startPlaying,
+  togglePause,
+  updateGame,
+} from "./game";
 import { renderGame } from "./render";
-import type { GameState } from "./types";
+import { DIFFICULTY_OPTIONS, hitDifficultyButton, hitMapCard } from "./ui/menu";
+import type { DifficultyChoice, GameState } from "./types";
 
 declare global {
   interface Window {
     advanceTime: (ms: number) => void;
     render_game_to_text: () => string;
+  }
+}
+
+const STORAGE_KEY_MAP = "daily-classic-game:selected-map";
+const STORAGE_KEY_DIFFICULTY = "daily-classic-game:selected-difficulty";
+
+function readPersistedMapId(): string {
+  const fallback = DEFAULT_MAP_ID;
+  try {
+    const value = window.localStorage.getItem(STORAGE_KEY_MAP);
+    if (value && MAP_DEFINITIONS.some((map) => map.id === value)) {
+      return value;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+function readPersistedDifficulty(): DifficultyChoice {
+  try {
+    const value = window.localStorage.getItem(STORAGE_KEY_DIFFICULTY);
+    if (value && DIFFICULTY_OPTIONS.includes(value as DifficultyChoice)) {
+      return value as DifficultyChoice;
+    }
+  } catch {
+    return "medium";
+  }
+  return "medium";
+}
+
+function persistSelection(state: GameState): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY_MAP, state.selectedMapId);
+    window.localStorage.setItem(STORAGE_KEY_DIFFICULTY, state.selectedDifficulty);
+  } catch {
+    // Local storage failures should not block gameplay.
   }
 }
 
@@ -32,35 +82,57 @@ const ctx: CanvasRenderingContext2D = context;
 const query = new URLSearchParams(window.location.search);
 const scriptedDemo = query.get("scripted_demo") === "1";
 
-let state: GameState = createInitialState(GAME_SEED, scriptedDemo);
+let state: GameState = createInitialState(
+  GAME_SEED,
+  scriptedDemo,
+  readPersistedMapId(),
+  readPersistedDifficulty(),
+);
 if (scriptedDemo) {
   startPlaying(state);
 }
 
-function restartToTitle(): void {
-  state = resetToTitle(state.seed, state.scriptedDemo);
-  if (scriptedDemo) {
-    startPlaying(state);
-  }
+function rebuildStateToTitle(): void {
+  state = createInitialState(state.seed, state.scriptedDemo, state.selectedMapId, state.selectedDifficulty);
+  resetToTitle(state);
 }
 
 function handlePointerDown(x: number, y: number): void {
-  if (state.mode === "title") {
+  if (state.screen === "title") {
     if (isStartButtonHit(x, y)) {
+      goToMapSelect(state);
+    }
+    return;
+  }
+
+  if (state.screen === "map_select") {
+    const selectedMapId = hitMapCard(x, y);
+    if (selectedMapId) {
+      selectMap(state, selectedMapId);
+      persistSelection(state);
+    }
+    return;
+  }
+
+  if (state.screen === "difficulty_select") {
+    const difficulty = hitDifficultyButton(x, y);
+    if (difficulty) {
+      selectDifficulty(state, difficulty);
+      persistSelection(state);
       startPlaying(state);
     }
     return;
   }
 
-  if (state.mode === "game_over") {
+  if (state.screen === "game_over") {
     if (isStartButtonHit(x, y)) {
-      restartToTitle();
-      startPlaying(state);
+      rebuildStateToTitle();
+      goToMapSelect(state);
     }
     return;
   }
 
-  if (state.mode === "playing") {
+  if (state.screen === "playing") {
     fireDartAt(state, x, y, null);
   }
 }
@@ -80,7 +152,7 @@ function handleKeyDown(key: string): void {
   }
 
   if (key === "r") {
-    restartToTitle();
+    rebuildStateToTitle();
     return;
   }
 
@@ -89,8 +161,17 @@ function handleKeyDown(key: string): void {
     return;
   }
 
-  if (key === "enter" && state.mode === "title") {
-    startPlaying(state);
+  if (key === "escape") {
+    rebuildStateToTitle();
+    return;
+  }
+
+  if (key === "enter") {
+    if (state.screen === "title") {
+      goToMapSelect(state);
+    } else if (state.screen === "difficulty_select") {
+      startPlaying(state);
+    }
   }
 }
 
