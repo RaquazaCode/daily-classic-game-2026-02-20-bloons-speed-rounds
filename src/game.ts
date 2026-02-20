@@ -1,6 +1,5 @@
 import {
   BALLOON_BASE_SPEED,
-  BALLOON_COLORS,
   BALLOON_MARKERS,
   BALLOON_RADIUS,
   BALLOON_SPAWN_INTERVAL_MS,
@@ -24,14 +23,17 @@ import {
   SPEED_ROUND_SCORE_MULTIPLIER,
   START_LIVES,
   TOWER_POSITION,
-  WAVE_BALLOON_STEP,
-  WAVE_BASE_BALLOONS,
 } from "./constants";
 import { circlesOverlap } from "./collision";
+import { TOWER_DEFINITIONS, towerUnlockedByWave } from "./data/towers";
+import { BALLOON_DEFINITIONS } from "./data/waves";
 import { DEFAULT_MAP_ID, DIFFICULTY_MODIFIERS, getMapById } from "./data/maps";
 import { seededRandom } from "./rng";
+import { applyTowerUpgrade, canPlaceTower, createTowerFromDefinition, findLeadTarget, findTowerAt, getNextUpgradeCost } from "./systems/towers";
+import { buildWavePlan, getWaveCompletionBonus } from "./systems/waves";
 import type {
   Balloon,
+  BalloonTier,
   Dart,
   DifficultyChoice,
   GameSnapshot,
@@ -39,10 +41,12 @@ import type {
   Particle,
   PathSegment,
   PendingEvent,
+  TowerTypeId,
   Vec2,
 } from "./types";
 
 const MAX_PENDING_EVENTS = 8;
+const BASE_PATH_SLOW_FACTOR = 0.45;
 
 interface PathInfo {
   segments: PathSegment[];
@@ -108,21 +112,11 @@ function getRunModifiers(state: GameState): RunModifiers {
   };
 }
 
-function calcWaveTargetCount(wave: number, waveSizeMultiplier: number): number {
-  const baseline = WAVE_BASE_BALLOONS + Math.max(0, wave - 1) * WAVE_BALLOON_STEP;
-  return Math.max(4, Math.round(baseline * waveSizeMultiplier));
-}
-
 function appendEvent(state: GameState, type: PendingEvent["type"], note: string): void {
   state.pendingEvents.push({ type, note, atMs: Math.round(state.elapsedMs) });
   if (state.pendingEvents.length > MAX_PENDING_EVENTS) {
     state.pendingEvents.splice(0, state.pendingEvents.length - MAX_PENDING_EVENTS);
   }
-}
-
-function nextColor(state: GameState): string {
-  const index = Math.floor(state.rng() * BALLOON_COLORS.length) % BALLOON_COLORS.length;
-  return BALLOON_COLORS[index];
 }
 
 function nextMarker(state: GameState): Balloon["marker"] {
@@ -136,6 +130,16 @@ function speedMultiplier(state: GameState): number {
 
 function scoreMultiplier(state: GameState): number {
   return state.speedRoundActive ? SPEED_ROUND_SCORE_MULTIPLIER : 1;
+}
+
+function startingCoins(difficulty: DifficultyChoice): number {
+  if (difficulty === "easy") {
+    return 240;
+  }
+  if (difficulty === "hard") {
+    return 170;
+  }
+  return 200;
 }
 
 function acquireDart(state: GameState): Dart {
@@ -152,6 +156,9 @@ function acquireDart(state: GameState): Dart {
     vy: 0,
     radius: DART_RADIUS,
     ttlMs: DART_LIFETIME_MS,
+    damage: 1,
+    color: "#f4fbff",
+    slowMs: 0,
     targetBalloonId: null,
   };
 }
@@ -198,9 +205,25 @@ function applyPathForMap(state: GameState, mapId: string): void {
   state.pathTotalLength = path.totalLength;
 }
 
-function resetRunProgress(state: GameState): void {
+function createWavePlan(state: GameState): BalloonTier[] {
   const modifiers = getRunModifiers(state);
+  const plan = buildWavePlan(state.wave, state.selectedDifficulty, state.rng);
+  if (modifiers.waveSizeMultiplier === 1) {
+    return plan;
+  }
+
+  const targetCount = Math.max(4, Math.round(plan.length * modifiers.waveSizeMultiplier));
+  const scaled: BalloonTier[] = [];
+  for (let index = 0; index < targetCount; index += 1) {
+    const source = plan[Math.floor((index / targetCount) * plan.length)] ?? plan[plan.length - 1];
+    scaled.push(source);
+  }
+  return scaled;
+}
+
+function resetRunProgress(state: GameState): void {
   state.score = 0;
+  state.coins = startingCoins(state.selectedDifficulty);
   state.lives = START_LIVES;
   state.wave = 1;
   state.elapsedMs = 0;
@@ -208,6 +231,11 @@ function resetRunProgress(state: GameState): void {
   state.speedRoundEndsAtMs = 0;
   state.nextSpeedRoundAtMs = SPEED_ROUND_INTERVAL_MS;
   state.balloons = [];
+
+  for (const tower of state.towers) {
+    void tower;
+  }
+  state.towers = [];
 
   for (const dart of state.darts) {
     releaseDart(state, dart);
@@ -219,38 +247,45 @@ function resetRunProgress(state: GameState): void {
   }
   state.particles = [];
 
+  state.wavePlan = createWavePlan(state);
+  state.waveSpawnCursor = 0;
   state.poppedTotal = 0;
   state.pendingEvents = [];
   state.scriptedShotCursor = 0;
   state.spawnCooldownMs = 0;
   state.spawnedInWave = 0;
-  state.waveTargetCount = calcWaveTargetCount(1, modifiers.waveSizeMultiplier);
+  state.waveTargetCount = state.wavePlan.length;
   state.muzzleFlashMs = 0;
   state.hitMarkerMs = 0;
   state.hitMarkerX = TOWER_POSITION.x;
   state.hitMarkerY = TOWER_POSITION.y;
   state.scoreTickValue = 0;
   state.scoreTickMs = 0;
+  state.placingTowerType = null;
 }
 
-function spawnBalloon(state: GameState): void {
-  if (state.spawnedInWave >= state.waveTargetCount) {
-    return;
-  }
-
+function spawnBalloon(state: GameState, tier: BalloonTier): void {
   const modifiers = getRunModifiers(state);
+  const definition = BALLOON_DEFINITIONS[tier];
   const startPoint = pointOnPath(state, 0);
-  const waveBoost = 1 + (state.wave - 1) * 0.05;
-  const speedVariance = 0.9 + state.rng() * 0.25;
+  const waveBoost = 1 + (state.wave - 1) * 0.045;
+  const speedVariance = 0.94 + state.rng() * 0.16;
+  const extraHealth = Math.floor((state.wave - 1) / 5);
 
   const balloon: Balloon = {
     id: state.nextEntityId,
+    tier,
     x: startPoint.x,
     y: startPoint.y,
     radius: BALLOON_RADIUS,
     distance: 0,
-    speed: BALLOON_BASE_SPEED * waveBoost * speedVariance * modifiers.speedMultiplier,
-    color: nextColor(state),
+    speed: BALLOON_BASE_SPEED * definition.speedMultiplier * waveBoost * speedVariance * modifiers.speedMultiplier,
+    health: definition.health + extraHealth,
+    maxHealth: definition.health + extraHealth,
+    reward: Math.max(1, Math.round(definition.reward * modifiers.rewardMultiplier)),
+    resistantToIce: definition.resistantToIce,
+    slowUntilMs: 0,
+    color: definition.color,
     marker: nextMarker(state),
   };
 
@@ -300,6 +335,100 @@ function tickFeedback(state: GameState, deltaMs: number): void {
   }
 }
 
+function spawnProjectile(
+  state: GameState,
+  originX: number,
+  originY: number,
+  targetX: number,
+  targetY: number,
+  projectileSpeed: number,
+  damage: number,
+  color: string,
+  targetBalloonId: number | null,
+  slowMs: number,
+): void {
+  const dx = targetX - originX;
+  const dy = targetY - originY;
+  const magnitude = Math.hypot(dx, dy);
+  if (magnitude <= 0.0001) {
+    return;
+  }
+
+  const dart = acquireDart(state);
+  dart.id = state.nextEntityId;
+  dart.x = originX;
+  dart.y = originY;
+  dart.vx = (dx / magnitude) * projectileSpeed;
+  dart.vy = (dy / magnitude) * projectileSpeed;
+  dart.radius = DART_RADIUS;
+  dart.ttlMs = DART_LIFETIME_MS;
+  dart.damage = damage;
+  dart.color = color;
+  dart.slowMs = slowMs;
+  dart.targetBalloonId = targetBalloonId;
+  state.nextEntityId += 1;
+  state.darts.push(dart);
+}
+
+function spawnTowerProjectiles(state: GameState, deltaMs: number): void {
+  if (state.balloons.length === 0) {
+    for (const tower of state.towers) {
+      tower.fireCooldownMs = Math.max(0, tower.fireCooldownMs - deltaMs);
+    }
+    return;
+  }
+
+  for (const tower of state.towers) {
+    tower.fireCooldownMs = Math.max(0, tower.fireCooldownMs - deltaMs);
+    if (tower.fireCooldownMs > 0) {
+      continue;
+    }
+
+    const definition = TOWER_DEFINITIONS[tower.typeId];
+    const target = findLeadTarget(tower, state.balloons);
+    if (!target) {
+      continue;
+    }
+
+    if (definition.mode === "radial") {
+      const count = definition.radialProjectiles ?? 6;
+      const startAngle = Math.atan2(target.y - tower.y, target.x - tower.x);
+      for (let index = 0; index < count; index += 1) {
+        const angle = startAngle + (Math.PI * 2 * index) / count;
+        const tx = tower.x + Math.cos(angle) * 50;
+        const ty = tower.y + Math.sin(angle) * 50;
+        spawnProjectile(
+          state,
+          tower.x,
+          tower.y,
+          tx,
+          ty,
+          definition.projectileSpeed,
+          tower.damage,
+          definition.projectileColor,
+          null,
+          definition.slowMs ?? 0,
+        );
+      }
+    } else {
+      spawnProjectile(
+        state,
+        tower.x,
+        tower.y,
+        target.x,
+        target.y,
+        definition.projectileSpeed,
+        tower.damage,
+        definition.projectileColor,
+        target.id,
+        definition.slowMs ?? 0,
+      );
+    }
+
+    tower.fireCooldownMs = tower.fireRateMs;
+  }
+}
+
 export function createInitialState(
   seed = GAME_SEED,
   scriptedDemo = false,
@@ -314,19 +443,24 @@ export function createInitialState(
     mode: "title",
     screen: "title",
     score: 0,
+    coins: 0,
     lives: START_LIVES,
     selectedMapId: map.id,
     selectedDifficulty,
+    placingTowerType: null,
     wave: 1,
     elapsedMs: 0,
     speedRoundActive: false,
     speedRoundEndsAtMs: 0,
     nextSpeedRoundAtMs: SPEED_ROUND_INTERVAL_MS,
     balloons: [],
+    towers: [],
     darts: [],
     dartPool: [],
     particles: [],
     particlePool: [],
+    wavePlan: [],
+    waveSpawnCursor: 0,
     poppedTotal: 0,
     pendingEvents: [],
     seed,
@@ -334,7 +468,7 @@ export function createInitialState(
     scriptedShotCursor: 0,
     spawnCooldownMs: 0,
     spawnedInWave: 0,
-    waveTargetCount: WAVE_BASE_BALLOONS,
+    waveTargetCount: 0,
     nextEntityId: 1,
     pathPoints,
     pathSegments: path.segments,
@@ -367,6 +501,10 @@ export function selectDifficulty(state: GameState, difficulty: DifficultyChoice)
   state.selectedDifficulty = difficulty;
 }
 
+export function setPlacingTowerType(state: GameState, towerType: TowerTypeId | null): void {
+  state.placingTowerType = towerType;
+}
+
 export function startPlaying(state: GameState): void {
   resetRunProgress(state);
   state.mode = "playing";
@@ -389,6 +527,50 @@ export function togglePause(state: GameState): void {
   }
 }
 
+export function tryPlaceTower(state: GameState, x: number, y: number): boolean {
+  const typeId = state.placingTowerType;
+  if (!typeId) {
+    return false;
+  }
+  const definition = TOWER_DEFINITIONS[typeId];
+  if (!towerUnlockedByWave(typeId, state.wave)) {
+    return false;
+  }
+  if (state.coins < definition.cost) {
+    return false;
+  }
+  if (!canPlaceTower(state.pathPoints, state.towers, x, y)) {
+    return false;
+  }
+
+  const tower = createTowerFromDefinition(state.nextEntityId, typeId, x, y);
+  state.nextEntityId += 1;
+  state.towers.push(tower);
+  state.coins -= definition.cost;
+  appendEvent(state, "pop", `tower:${typeId} coins:${state.coins}`);
+  return true;
+}
+
+export function tryUpgradeTowerAt(state: GameState, x: number, y: number): boolean {
+  const tower = findTowerAt(state.towers, x, y);
+  if (!tower) {
+    return false;
+  }
+  const cost = getNextUpgradeCost(tower);
+  if (cost == null || state.coins < cost) {
+    return false;
+  }
+
+  const upgraded = applyTowerUpgrade(tower);
+  if (!upgraded) {
+    return false;
+  }
+
+  state.coins -= cost;
+  appendEvent(state, "pop", `upgrade:${tower.typeId}:L${tower.level} coins:${state.coins}`);
+  return true;
+}
+
 export function fireDartAt(
   state: GameState,
   targetX: number,
@@ -399,26 +581,18 @@ export function fireDartAt(
     return;
   }
 
-  const dx = targetX - TOWER_POSITION.x;
-  const dy = targetY - TOWER_POSITION.y;
-  const magnitude = Math.hypot(dx, dy);
-
-  if (magnitude <= 0.0001) {
-    return;
-  }
-
-  const dart = acquireDart(state);
-  dart.id = state.nextEntityId;
-  dart.x = TOWER_POSITION.x;
-  dart.y = TOWER_POSITION.y;
-  dart.vx = (dx / magnitude) * DART_SPEED;
-  dart.vy = (dy / magnitude) * DART_SPEED;
-  dart.radius = DART_RADIUS;
-  dart.ttlMs = DART_LIFETIME_MS;
-  dart.targetBalloonId = targetBalloonId;
-
-  state.nextEntityId += 1;
-  state.darts.push(dart);
+  spawnProjectile(
+    state,
+    TOWER_POSITION.x,
+    TOWER_POSITION.y,
+    targetX,
+    targetY,
+    DART_SPEED,
+    2,
+    "#f4fbff",
+    targetBalloonId,
+    0,
+  );
   state.muzzleFlashMs = MUZZLE_FLASH_DURATION_MS;
 }
 
@@ -451,10 +625,11 @@ function runScriptedShotSchedule(state: GameState): void {
 
 function updateBalloons(state: GameState, deltaSeconds: number): void {
   const survivors: Balloon[] = [];
-  const moveScale = speedMultiplier(state);
+  const speedScale = speedMultiplier(state);
 
   for (const balloon of state.balloons) {
-    const nextDistance = balloon.distance + balloon.speed * moveScale * deltaSeconds;
+    const slowScale = state.elapsedMs < balloon.slowUntilMs ? BASE_PATH_SLOW_FACTOR : 1;
+    const nextDistance = balloon.distance + balloon.speed * speedScale * slowScale * deltaSeconds;
     if (nextDistance >= state.pathTotalLength) {
       state.lives -= 1;
       appendEvent(state, "life_lost", `lives:${state.lives}`);
@@ -489,8 +664,9 @@ function updateDarts(state: GameState, deltaSeconds: number, deltaMs: number): v
         const dy = target.y - dart.y;
         const mag = Math.hypot(dx, dy);
         if (mag > 0.0001) {
-          dart.vx = (dx / mag) * DART_SPEED;
-          dart.vy = (dy / mag) * DART_SPEED;
+          const speed = Math.hypot(dart.vx, dart.vy);
+          dart.vx = (dx / mag) * speed;
+          dart.vy = (dy / mag) * speed;
         }
       }
     }
@@ -536,73 +712,93 @@ function resolveCollisions(state: GameState): void {
     return;
   }
 
-  const balloonIdsToRemove = new Set<number>();
-  const dartIdsToRemove = new Set<number>();
+  const deadBalloonIds = new Set<number>();
+  const removeDartIds = new Set<number>();
   const poppedBalloons: Balloon[] = [];
 
   for (const dart of state.darts) {
-    if (dartIdsToRemove.has(dart.id)) {
+    if (removeDartIds.has(dart.id)) {
       continue;
     }
 
     for (const balloon of state.balloons) {
-      if (balloonIdsToRemove.has(balloon.id)) {
+      if (deadBalloonIds.has(balloon.id)) {
         continue;
       }
 
-      if (circlesOverlap(dart.x, dart.y, dart.radius, balloon.x, balloon.y, balloon.radius)) {
-        balloonIdsToRemove.add(balloon.id);
-        dartIdsToRemove.add(dart.id);
-        poppedBalloons.push(balloon);
-        break;
+      if (!circlesOverlap(dart.x, dart.y, dart.radius, balloon.x, balloon.y, balloon.radius)) {
+        continue;
       }
+
+      removeDartIds.add(dart.id);
+
+      if (dart.slowMs > 0 && !balloon.resistantToIce) {
+        balloon.slowUntilMs = Math.max(balloon.slowUntilMs, state.elapsedMs + dart.slowMs);
+      }
+
+      const armor = balloon.tier === "black" ? 1 : 0;
+      const appliedDamage = Math.max(1, dart.damage - armor);
+      balloon.health -= appliedDamage;
+
+      if (balloon.health <= 0) {
+        deadBalloonIds.add(balloon.id);
+        poppedBalloons.push(balloon);
+      }
+      break;
     }
   }
 
-  if (balloonIdsToRemove.size === 0) {
+  if (removeDartIds.size > 0) {
+    const remainingDarts: Dart[] = [];
+    for (const dart of state.darts) {
+      if (removeDartIds.has(dart.id)) {
+        releaseDart(state, dart);
+        continue;
+      }
+      remainingDarts.push(dart);
+    }
+    state.darts = remainingDarts;
+  }
+
+  if (deadBalloonIds.size === 0) {
     return;
   }
 
-  state.balloons = state.balloons.filter((balloon) => !balloonIdsToRemove.has(balloon.id));
+  state.balloons = state.balloons.filter((balloon) => !deadBalloonIds.has(balloon.id));
 
-  const remainingDarts: Dart[] = [];
-  for (const dart of state.darts) {
-    if (dartIdsToRemove.has(dart.id)) {
-      releaseDart(state, dart);
-      continue;
-    }
-    remainingDarts.push(dart);
-  }
-  state.darts = remainingDarts;
-
+  let coinDelta = 0;
   for (const balloon of poppedBalloons) {
+    coinDelta += balloon.reward;
     spawnPopParticles(state, balloon.x, balloon.y, balloon.color);
   }
 
-  const poppedCount = balloonIdsToRemove.size;
-  const scoreDelta = Math.round(BASE_POP_SCORE * scoreMultiplier(state) * poppedCount * getRunModifiers(state).rewardMultiplier);
-  state.poppedTotal += poppedCount;
+  const scoreDelta = Math.round((BASE_POP_SCORE + coinDelta) * scoreMultiplier(state));
+  state.poppedTotal += poppedBalloons.length;
   state.score += scoreDelta;
+  state.coins += coinDelta;
   state.hitMarkerMs = HIT_MARKER_DURATION_MS;
   state.hitMarkerX = poppedBalloons[0].x;
   state.hitMarkerY = poppedBalloons[0].y;
   state.scoreTickValue = scoreDelta;
   state.scoreTickMs = SCORE_TICK_DURATION_MS;
-  appendEvent(state, "pop", `x${poppedCount} score:${state.score}`);
+  appendEvent(state, "pop", `x${poppedBalloons.length} score:${state.score} coins:${state.coins}`);
 }
 
 function maybeStartNextWave(state: GameState): void {
-  const waveIsComplete = state.spawnedInWave >= state.waveTargetCount && state.balloons.length === 0;
-  if (!waveIsComplete || state.mode !== "playing") {
+  const waveComplete = state.waveSpawnCursor >= state.wavePlan.length && state.balloons.length === 0;
+  if (!waveComplete || state.mode !== "playing") {
     return;
   }
 
+  const completionBonus = getWaveCompletionBonus(state.wave, state.selectedDifficulty);
+  state.coins += completionBonus;
   state.wave += 1;
-  const modifiers = getRunModifiers(state);
-  state.waveTargetCount = calcWaveTargetCount(state.wave, modifiers.waveSizeMultiplier);
+  state.wavePlan = createWavePlan(state);
+  state.waveSpawnCursor = 0;
   state.spawnedInWave = 0;
+  state.waveTargetCount = state.wavePlan.length;
   state.spawnCooldownMs = 0;
-  appendEvent(state, "wave_start", `wave:${state.wave}`);
+  appendEvent(state, "wave_start", `wave:${state.wave} bonus:${completionBonus}`);
 }
 
 export function updateGame(state: GameState, deltaMs: number): void {
@@ -622,10 +818,14 @@ export function updateGame(state: GameState, deltaMs: number): void {
   const spawnInterval = BALLOON_SPAWN_INTERVAL_MS * modifiers.intervalMultiplier;
 
   state.spawnCooldownMs += deltaMs;
-  while (state.spawnedInWave < state.waveTargetCount && state.spawnCooldownMs >= spawnInterval) {
-    spawnBalloon(state);
+  while (state.waveSpawnCursor < state.wavePlan.length && state.spawnCooldownMs >= spawnInterval) {
+    const tier = state.wavePlan[state.waveSpawnCursor];
+    spawnBalloon(state, tier);
+    state.waveSpawnCursor += 1;
     state.spawnCooldownMs -= spawnInterval;
   }
+
+  spawnTowerProjectiles(state, deltaMs);
 
   if (state.scriptedDemo) {
     runScriptedShotSchedule(state);
@@ -654,6 +854,7 @@ export function snapshotState(state: GameState): GameSnapshot {
     mode: state.mode,
     screen: state.screen,
     score: state.score,
+    coins: state.coins,
     lives: state.lives,
     wave: state.wave,
     selectedMapId: state.selectedMapId,
@@ -661,7 +862,8 @@ export function snapshotState(state: GameState): GameSnapshot {
     speedRoundActive: state.speedRoundActive,
     speedRoundEndsInMs: state.speedRoundActive ? Math.max(0, Math.round(state.speedRoundEndsAtMs - state.elapsedMs)) : 0,
     balloonsAlive: state.balloons.length,
-    dartsAlive: state.darts.length,
+    towersPlaced: state.towers.length,
+    projectilesAlive: state.darts.length,
     poppedTotal: state.poppedTotal,
     seed: state.seed,
     pendingEvents: state.pendingEvents.map((event) => `${event.type}:${event.note}`),

@@ -1,7 +1,15 @@
 import { CANVAS_HEIGHT, CANVAS_WIDTH, GAME_TITLE, SPEED_ROUND_SCORE_MULTIPLIER, START_BUTTON, TOWER_POSITION } from "./constants";
+import { TOWER_DEFINITIONS, TOWER_ORDER, towerUnlockedByWave } from "./data/towers";
 import { DIFFICULTY_OPTIONS, difficultyButtonRect, mapCardRect } from "./ui/menu";
 import { MAP_DEFINITIONS } from "./data/maps";
-import type { Balloon, GameState, Vec2 } from "./types";
+import type { Balloon, GameState, TowerTypeId, Vec2 } from "./types";
+
+const TOWER_COLORS: Record<TowerTypeId, string> = {
+  dart_monkey: "#f3d36e",
+  tack_sprayer: "#ffb07e",
+  ice_tower: "#9fe8ff",
+  sniper: "#dce7ff",
+};
 
 function drawBackgroundLayer(ctx: CanvasRenderingContext2D): void {
   const sky = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
@@ -76,7 +84,7 @@ function drawPathLayer(ctx: CanvasRenderingContext2D, pathPoints: Vec2[]): void 
   ctx.setLineDash([]);
 }
 
-function drawTowerLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
+function drawBaseTower(ctx: CanvasRenderingContext2D, state: GameState): void {
   ctx.save();
   ctx.translate(TOWER_POSITION.x, TOWER_POSITION.y);
 
@@ -99,18 +107,54 @@ function drawTowerLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
     ctx.beginPath();
     ctx.arc(0, -46, 30 * alpha + 8, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.strokeStyle = `rgba(255, 210, 120, ${0.8 * alpha})`;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, -46);
-    ctx.lineTo(-14, -78);
-    ctx.moveTo(0, -46);
-    ctx.lineTo(14, -78);
-    ctx.stroke();
   }
 
   ctx.restore();
+}
+
+function drawPlacedTowers(ctx: CanvasRenderingContext2D, state: GameState): void {
+  for (const tower of state.towers) {
+    ctx.save();
+    ctx.translate(tower.x, tower.y);
+
+    const fill = TOWER_COLORS[tower.typeId];
+    ctx.fillStyle = "#122744";
+    ctx.beginPath();
+    ctx.arc(0, 0, 23, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(0, -6, 13, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+    ctx.font = "700 12px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`L${tower.level}`, 0, 21);
+    ctx.textAlign = "left";
+
+    ctx.restore();
+  }
+
+  if (state.placingTowerType) {
+    const sample = state.towers.find((tower) => tower.typeId === state.placingTowerType);
+    const fallbackRange = sample?.range ?? TOWER_DEFINITIONS[state.placingTowerType].range;
+    ctx.strokeStyle = "rgba(172, 245, 204, 0.32)";
+    ctx.lineWidth = 2;
+    for (const tower of state.towers) {
+      if (tower.typeId !== state.placingTowerType) {
+        continue;
+      }
+      ctx.beginPath();
+      ctx.arc(tower.x, tower.y, tower.range, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(172, 245, 204, 0.75)";
+    ctx.font = "600 15px 'Barlow', 'Trebuchet MS', sans-serif";
+    ctx.fillText(`Placing ${TOWER_DEFINITIONS[state.placingTowerType].name} • range ${Math.round(fallbackRange)}`, 24, CANVAS_HEIGHT - 44);
+  }
 }
 
 function drawColorblindMarker(ctx: CanvasRenderingContext2D, balloon: Balloon): void {
@@ -160,6 +204,13 @@ function drawBalloonsLayer(ctx: CanvasRenderingContext2D, state: GameState): voi
 
     drawColorblindMarker(ctx, balloon);
 
+    const healthWidth = 24;
+    const healthPct = Math.max(0, balloon.health / balloon.maxHealth);
+    ctx.fillStyle = "rgba(10, 18, 22, 0.65)";
+    ctx.fillRect(balloon.x - healthWidth / 2, balloon.y - balloon.radius - 11, healthWidth, 4);
+    ctx.fillStyle = "#8dffb6";
+    ctx.fillRect(balloon.x - healthWidth / 2, balloon.y - balloon.radius - 11, healthWidth * healthPct, 4);
+
     ctx.beginPath();
     ctx.strokeStyle = "rgba(17, 39, 44, 0.55)";
     ctx.moveTo(balloon.x, balloon.y + balloon.radius);
@@ -169,8 +220,8 @@ function drawBalloonsLayer(ctx: CanvasRenderingContext2D, state: GameState): voi
 }
 
 function drawProjectilesLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
-  ctx.fillStyle = "#ecf8ff";
   for (const dart of state.darts) {
+    ctx.fillStyle = dart.color;
     ctx.beginPath();
     ctx.arc(dart.x, dart.y, dart.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -270,7 +321,7 @@ function drawTitleScreen(ctx: CanvasRenderingContext2D): void {
 
   ctx.font = "600 23px 'Barlow', 'Trebuchet MS', sans-serif";
   ctx.fillStyle = "#aceac9";
-  ctx.fillText("Three courses. Dynamic difficulty. Deterministic simulation.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 6);
+  ctx.fillText("Three courses. Dynamic difficulty. Tower progression.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 6);
 
   drawButton(ctx, "Select Course", { x: START_BUTTON.x + START_BUTTON.width / 2, y: START_BUTTON.y + START_BUTTON.height / 2 });
   ctx.textAlign = "left";
@@ -383,11 +434,47 @@ function drawGameOverOverlay(ctx: CanvasRenderingContext2D, state: GameState): v
   ctx.textAlign = "left";
 }
 
+function drawTowerShop(ctx: CanvasRenderingContext2D, state: GameState): void {
+  const panelX = 18;
+  const panelY = 510;
+  const panelWidth = 360;
+  const panelHeight = 186;
+
+  ctx.fillStyle = "rgba(6, 27, 24, 0.82)";
+  ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+  ctx.strokeStyle = "rgba(143, 227, 188, 0.44)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
+
+  ctx.fillStyle = "#c6f8df";
+  ctx.font = "700 18px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.fillText("Tower Shop", panelX + 12, panelY + 24);
+
+  TOWER_ORDER.forEach((towerId, index) => {
+    const def = TOWER_DEFINITIONS[towerId];
+    const unlocked = towerUnlockedByWave(towerId, state.wave);
+    const selected = state.placingTowerType === towerId;
+
+    const rowY = panelY + 42 + index * 34;
+    ctx.fillStyle = selected ? "rgba(238, 188, 103, 0.3)" : "rgba(255, 255, 255, 0)";
+    ctx.fillRect(panelX + 8, rowY - 14, panelWidth - 16, 26);
+
+    ctx.fillStyle = unlocked ? "#f5edc4" : "rgba(175, 194, 186, 0.75)";
+    ctx.font = "600 15px 'Barlow', 'Trebuchet MS', sans-serif";
+    const lockText = unlocked ? `$${def.cost}` : `Unlock W${def.unlockWave}`;
+    ctx.fillText(`${index + 1}. ${def.name} • ${lockText}`, panelX + 14, rowY);
+  });
+
+  ctx.fillStyle = "#9de4c8";
+  ctx.font = "600 13px 'Barlow', 'Trebuchet MS', sans-serif";
+  ctx.fillText("Click empty ground to place • Click tower to upgrade • 0 cancels", panelX + 12, panelY + panelHeight - 14);
+}
+
 function drawHudLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
   drawHudPanel(ctx, "Score", String(state.score), 20, 86);
   drawHudPanel(ctx, "Lives", String(state.lives), 214, 86);
   drawHudPanel(ctx, "Wave", String(state.wave), 408, 86);
-  drawHudPanel(ctx, "Popped", String(state.poppedTotal), 602, 86);
+  drawHudPanel(ctx, "Coins", String(state.coins), 602, 86);
 
   if (state.speedRoundActive) {
     ctx.fillStyle = "rgba(238, 129, 72, 0.86)";
@@ -407,13 +494,16 @@ function drawHudLayer(ctx: CanvasRenderingContext2D, state: GameState): void {
 
   ctx.fillStyle = "#d8ffe9";
   ctx.font = "600 18px 'Barlow', 'Trebuchet MS', sans-serif";
-  ctx.fillText("Controls: Click to shoot • P pause • R restart • F fullscreen", 22, CANVAS_HEIGHT - 20);
+  ctx.fillText("Controls: 1-4 select tower • Click place/upgrade • P pause • R restart • F fullscreen", 22, CANVAS_HEIGHT - 18);
+
+  drawTowerShop(ctx, state);
 }
 
 export function renderGame(ctx: CanvasRenderingContext2D, state: GameState): void {
   drawBackgroundLayer(ctx);
   drawPathLayer(ctx, state.pathPoints);
-  drawTowerLayer(ctx, state);
+  drawBaseTower(ctx, state);
+  drawPlacedTowers(ctx, state);
   drawBalloonsLayer(ctx, state);
   drawProjectilesLayer(ctx, state);
   drawEffectsLayer(ctx, state);

@@ -32,7 +32,18 @@ export function bindInput(canvas: HTMLCanvasElement, callbacks: InputCallbacks):
 
   const keyHandler = (event: KeyboardEvent): void => {
     const key = event.key.toLowerCase();
-    if (key === "p" || key === "r" || key === "f" || key === "enter" || key === "escape") {
+    if (
+      key === "p" ||
+      key === "r" ||
+      key === "f" ||
+      key === "enter" ||
+      key === "escape" ||
+      key === "0" ||
+      key === "1" ||
+      key === "2" ||
+      key === "3" ||
+      key === "4"
+    ) {
       event.preventDefault();
     }
     callbacks.onKeyDown(key);
