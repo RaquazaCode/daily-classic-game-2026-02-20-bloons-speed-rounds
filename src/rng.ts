@@ -4,6 +4,7 @@ export function seededRandom(seed: string): () => number {
     hash ^= seed.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
   }
+
   return () => {
     hash += 0x6d2b79f5;
     let t = hash;
