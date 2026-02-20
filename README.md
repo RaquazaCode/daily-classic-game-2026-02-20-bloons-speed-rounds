@@ -1,11 +1,11 @@
 # daily-classic-game-2026-02-20-bloons-speed-rounds
 
 <p align="center">
-  <strong>Classic Bloons-style defense with deterministic speed-round spikes every 20 seconds.</strong>
+  <strong>Neo Jungle Bloons defense with map selection, tower progression, and deterministic speed-round spikes.</strong>
 </p>
 
 <p align="center">
-  <img alt="Gameplay during speed round" src="playwright/main-actions/shot-6.png" width="920" />
+  <img alt="Gameplay with tower shop and speed round" src="playwright/main-actions/shot-7.png" width="920" />
 </p>
 
 ## GIF Captures
@@ -33,32 +33,35 @@ pnpm build
 ```
 
 ## How To Play
-- Click anywhere on the arena to fire darts from the monkey tower.
-- Balloons follow the lane from left to right.
-- Stop balloons before they escape the lane end.
+- From title, choose a course and difficulty.
+- During gameplay, press `1`-`4` to select a tower, then click ground to place.
+- Click an existing tower to upgrade it (up to 2 upgrades).
+- If no placement/upgrade action is used, clicking fires a manual assist dart.
 - Controls:
 - `P`: pause/resume.
 - `R`: restart to seeded baseline.
 - `F`: toggle fullscreen.
+- `0`: cancel tower placement.
 
 ## Rules
-- Game starts on the title screen and begins when you click `Start Game`.
-- Each escaped balloon removes one life.
-- You lose when lives reach zero.
-- Clearing all balloons in a wave starts the next wave with more balloons.
-- Deterministic scripted path is available at `?scripted_demo=1`.
+- Escaped balloons remove one life.
+- Balloon tiers have higher health at later waves, and black balloons resist ice slow effects.
+- Completing a wave grants bonus coins and unlocks stronger towers by wave.
+- Losing all lives ends the run.
+- Deterministic scripted mode remains available at `?scripted_demo=1`.
 
 ## Scoring
-- Base score: `10` points per balloon popped.
-- Pops are deterministic for a fixed seed and action sequence.
-- HUD tracks `Score`, `Lives`, `Wave`, and `Popped` count.
+- Popping balloons grants score and coins.
+- Score scales up during speed rounds.
+- HUD tracks score, lives, wave, and coins.
+- `window.render_game_to_text()` exposes deterministic state snapshots.
 
 ## Twist
-- `Speed rounds` activate every `20s` of game time.
-- During speed rounds (8s window):
+- Speed rounds activate every `20s` for `8s`.
+- During speed rounds:
 - Balloon movement speed is multiplied by `1.75x`.
 - Pop scoring is multiplied by `2x`.
-- The top HUD turns orange and displays remaining speed-round time.
+- HUD switches to orange speed-round status with countdown.
 
 ## Verification
 ```bash
@@ -68,8 +71,8 @@ WEB_GAME_URL="http://127.0.0.1:4173/?scripted_demo=1" node scripts/capture_playw
 ```
 
 Deterministic capture proof:
-- `playwright/main-actions/state-2.json` shows score growth and pops.
-- `playwright/main-actions/state-6.json` shows active speed round with countdown.
+- `playwright/main-actions/state-2.json` confirms tower placement and coins update.
+- `playwright/main-actions/state-7.json` confirms speed round + progression state.
 
 Browser hooks:
 - `window.advanceTime(ms)`
@@ -82,6 +85,15 @@ src/
   types.ts
   rng.ts
   collision.ts
+  data/
+    maps.ts
+    towers.ts
+    waves.ts
+  systems/
+    towers.ts
+    waves.ts
+  ui/
+    menu.ts
   game.ts
   input.ts
   render.ts

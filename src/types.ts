@@ -1,6 +1,8 @@
 export type Mode = "title" | "playing" | "paused" | "game_over";
 export type Screen = "title" | "map_select" | "difficulty_select" | "playing" | "paused" | "game_over";
 export type DifficultyChoice = "easy" | "medium" | "hard";
+export type TowerTypeId = "dart_monkey" | "tack_sprayer" | "ice_tower" | "sniper";
+export type BalloonTier = "red" | "blue" | "green" | "black";
 
 export interface Vec2 {
   x: number;
@@ -15,11 +17,17 @@ export interface PathSegment {
 
 export interface Balloon {
   id: number;
+  tier: BalloonTier;
   x: number;
   y: number;
   radius: number;
   distance: number;
   speed: number;
+  health: number;
+  maxHealth: number;
+  reward: number;
+  resistantToIce: boolean;
+  slowUntilMs: number;
   color: string;
   marker: "dot" | "ring" | "stripe" | "cross";
 }
@@ -32,7 +40,22 @@ export interface Dart {
   vy: number;
   radius: number;
   ttlMs: number;
+  damage: number;
+  color: string;
+  slowMs: number;
   targetBalloonId: number | null;
+}
+
+export interface PlacedTower {
+  id: number;
+  typeId: TowerTypeId;
+  x: number;
+  y: number;
+  range: number;
+  fireCooldownMs: number;
+  fireRateMs: number;
+  damage: number;
+  level: number;
 }
 
 export interface Particle {
@@ -56,19 +79,24 @@ export interface GameState {
   mode: Mode;
   screen: Screen;
   score: number;
+  coins: number;
   lives: number;
   selectedMapId: string;
   selectedDifficulty: DifficultyChoice;
+  placingTowerType: TowerTypeId | null;
   wave: number;
   elapsedMs: number;
   speedRoundActive: boolean;
   speedRoundEndsAtMs: number;
   nextSpeedRoundAtMs: number;
   balloons: Balloon[];
+  towers: PlacedTower[];
   darts: Dart[];
   dartPool: Dart[];
   particles: Particle[];
   particlePool: Particle[];
+  wavePlan: BalloonTier[];
+  waveSpawnCursor: number;
   poppedTotal: number;
   pendingEvents: PendingEvent[];
   seed: string;
@@ -94,6 +122,7 @@ export interface GameSnapshot {
   mode: Mode;
   screen: Screen;
   score: number;
+  coins: number;
   lives: number;
   wave: number;
   selectedMapId: string;
@@ -101,7 +130,8 @@ export interface GameSnapshot {
   speedRoundActive: boolean;
   speedRoundEndsInMs: number;
   balloonsAlive: number;
-  dartsAlive: number;
+  towersPlaced: number;
+  projectilesAlive: number;
   poppedTotal: number;
   seed: string;
   pendingEvents: string[];

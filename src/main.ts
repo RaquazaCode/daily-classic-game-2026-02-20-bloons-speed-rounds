@@ -10,13 +10,16 @@ import {
   resetToTitle,
   selectDifficulty,
   selectMap,
+  setPlacingTowerType,
   startPlaying,
   togglePause,
+  tryPlaceTower,
+  tryUpgradeTowerAt,
   updateGame,
 } from "./game";
 import { renderGame } from "./render";
 import { DIFFICULTY_OPTIONS, hitDifficultyButton, hitMapCard } from "./ui/menu";
-import type { DifficultyChoice, GameState } from "./types";
+import type { DifficultyChoice, GameState, TowerTypeId } from "./types";
 
 declare global {
   interface Window {
@@ -27,6 +30,13 @@ declare global {
 
 const STORAGE_KEY_MAP = "daily-classic-game:selected-map";
 const STORAGE_KEY_DIFFICULTY = "daily-classic-game:selected-difficulty";
+
+const HOTKEY_TOWER: Record<string, TowerTypeId> = {
+  "1": "dart_monkey",
+  "2": "tack_sprayer",
+  "3": "ice_tower",
+  "4": "sniper",
+};
 
 function readPersistedMapId(): string {
   const fallback = DEFAULT_MAP_ID;
@@ -133,6 +143,15 @@ function handlePointerDown(x: number, y: number): void {
   }
 
   if (state.screen === "playing") {
+    if (state.placingTowerType) {
+      void tryPlaceTower(state, x, y);
+      return;
+    }
+
+    if (tryUpgradeTowerAt(state, x, y)) {
+      return;
+    }
+
     fireDartAt(state, x, y, null);
   }
 }
@@ -162,7 +181,23 @@ function handleKeyDown(key: string): void {
   }
 
   if (key === "escape") {
+    if (state.screen === "playing" && state.placingTowerType) {
+      setPlacingTowerType(state, null);
+      return;
+    }
     rebuildStateToTitle();
+    return;
+  }
+
+  if (key === "0") {
+    setPlacingTowerType(state, null);
+    return;
+  }
+
+  if (key in HOTKEY_TOWER) {
+    if (state.screen === "playing") {
+      setPlacingTowerType(state, HOTKEY_TOWER[key]);
+    }
     return;
   }
 
